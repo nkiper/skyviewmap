@@ -12,12 +12,15 @@ dependencies = [
     "numpy>=1.26",
     "skyfield>=1.49",
     "rasterio>=1.4",
+    "xarray>=2024.1",
+    "netCDF4>=1.6",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "pyright",
+    "pandas-stubs",
 ]
 
 [tool.pytest.ini_options]
@@ -25,6 +28,13 @@ testpaths = ["tests"]
 markers = [
     "ephemeris: needs the DE440s file in data/raw/skyfield (skipped if absent)",
     "dem: needs GLO-90 tiles in data/raw/dem/glo90 (skipped if absent)",
+    "era5: needs downloaded ERA5 cloud samples (skipped if absent)",
+]
+filterwarnings = [
+    # netCDF4's Cython extension checks numpy.ndarray's size at import; a larger
+    # runtime object is the backward-compatible direction. numpy silences this
+    # by default, but pytest resets warning filters.
+    "ignore:numpy.ndarray size changed:RuntimeWarning",
 ]
 
 # Shared by Pylance (VS Code Problems panel) and the pyright CLI.

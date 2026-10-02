@@ -20,8 +20,8 @@ overhead. The model therefore looks up cloud cover where the ray crosses each la
 | 2. Sun position at maximum eclipse per grid point (Skyfield) | ✅ done |
 | 3. Terrain horizon mask (Copernicus DEM) | ✅ done |
 | 3b. Multiple regions (Iberia + Iceland) | ✅ done |
-| 4. ERA5 low/mid/high cloud climatology | ⏳ next |
-| 5. Cloud sampled along the line of sight, layers combined | — |
+| 4. ERA5 low/mid/high cloud climatology | ✅ done |
+| 5. Cloud sampled along the line of sight, layers combined | ⏳ next |
 | 6. End-to-end pipeline and P(clear view) map | — |
 
 ## Setup
@@ -32,12 +32,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python -m skyviewmapper.io.skyfield_data   # downloads DE440s ephemeris (~32 MB)
 .venv/bin/python -m skyviewmapper.io.dem             # downloads GLO-90 DEM tiles, all regions (~490 MB)
+.venv/bin/python -m skyviewmapper.io.era5            # downloads ERA5 cloud cover via the CDS (queued; can take a while)
 .venv/bin/python -m pytest
 .venv/bin/pyright                                    # type check (0 errors expected)
 ```
 
-Tests marked `ephemeris` (NASA eclipse tables) and `dem` (real DEM) are skipped
-until the corresponding data has been downloaded. ERA5 downloads (from milestone 4) need a Copernicus CDS API key in `~/.cdsapirc`.
+Tests marked `ephemeris` (NASA eclipse tables), `dem` (real DEM) and `era5` (real
+cloud data) are skipped until the corresponding data has been downloaded. ERA5
+downloads need a Copernicus CDS API key in `~/.cdsapirc` and the licence of
+"ERA5 hourly data on single levels from 1940 to present" accepted on the CDS website.
 
 ## Layout
 ```
@@ -49,7 +52,9 @@ src/skyviewmapper/
   grid.py        regular lat/lon grid of map cells
   regions.py     regions (Iberia, Iceland): grid, DEM extent, ephemeris time window
   terrain.py     horizon toward the Sun per spot; per-cell terrain visibility
-  io/            data loading (skyfield_data.py: JPL ephemeris; dem.py: Copernicus GLO-90)
+  climatology.py summary statistics of the cloud samples (layer means, overhead P(clear))
+  io/            data loading (skyfield_data.py: JPL ephemeris; dem.py: Copernicus GLO-90;
+                 era5.py: ERA5 cloud cover from the CDS)
 tests/           pytest, checked against hand calculations and NASA tables
 data/, outputs/  downloaded data and results (git-ignored)
 ```
@@ -69,4 +74,8 @@ data/, outputs/  downloaded data and results (git-ignored)
   flattens sharp summits by tens of metres.
 - Each region must lie within one Copernicus DEM latitude band (longitude
   pixels widen above 50°N: 6″ in Iceland vs 3″ in Iberia).
-- Cloud layers are combined assuming random overlap (milestone 5).
+- Cloud: ERA5 hourly low/medium/high cloud cover (0.25°), 1996–2025, 5–19 August,
+  at the two full hours bracketing the eclipse (18–19 UT Iberia, 17–18 UT
+  Iceland). Every sample is kept: layers are combined per sample assuming
+  random overlap, P(clear) = (1 − low)(1 − mid)(1 − high), and only then
+  averaged, because cloud layers are correlated in time.
