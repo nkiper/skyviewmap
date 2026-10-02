@@ -32,10 +32,15 @@ Assumptions and approximations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from skyfield.earthlib import refract
 from skyfield.framelib import itrs
+from skyfield.jpllib import SpiceKernel
+from skyfield.positionlib import Apparent, Barycentric
+from skyfield.timelib import Timescale
 
 from .constants import (
     R_MOON_M,
@@ -55,10 +60,10 @@ class BodyTrack:
 
     t0_utc: np.datetime64
     step_s: float
-    sun_m: np.ndarray  # (n, 3)
-    moon_m: np.ndarray  # (n, 3)
+    sun_m: NDArray[np.float64]  # (n, 3)
+    moon_m: NDArray[np.float64]  # (n, 3)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.sun_m)
 
 
@@ -72,7 +77,7 @@ class LocalCircumstances:
     outside the path of totality.
     """
 
-    t_max_utc: np.ndarray
+    t_max_utc: NDArray[np.datetime64]
     separation_deg: np.ndarray
     sun_alt_deg: np.ndarray
     sun_alt_apparent_deg: np.ndarray
@@ -88,7 +93,7 @@ class LocalCircumstances:
 # --- pure geometry -----------------------------------------------------------
 
 
-def observer_itrs(lat_deg, lon_deg, height_m=0.0):
+def observer_itrs(lat_deg: ArrayLike, lon_deg: ArrayLike, height_m: ArrayLike = 0.0) -> NDArray[np.float64]:
     """Earth-fixed (ITRS/ECEF) position in metres of a point on the WGS84 ellipsoid, shape (..., 3)."""
     phi = np.radians(np.asarray(lat_deg, dtype=float))
     lam = np.radians(np.asarray(lon_deg, dtype=float))
@@ -106,7 +111,7 @@ def observer_itrs(lat_deg, lon_deg, height_m=0.0):
     )
 
 
-def enu_basis(lat_deg, lon_deg):
+def enu_basis(lat_deg: ArrayLike, lon_deg: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Unit east, north and up vectors (each shape (..., 3)) in ITRS at a geodetic lat/lon."""
     phi = np.radians(np.asarray(lat_deg, dtype=float))
     lam = np.radians(np.asarray(lon_deg, dtype=float))
@@ -118,8 +123,9 @@ def enu_basis(lat_deg, lon_deg):
     return east, north, up
 
 
-def alt_az(vec, lat_deg, lon_deg):
+def alt_az(vec: ArrayLike, lat_deg: ArrayLike, lon_deg: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Geometric altitude and azimuth (degrees) of ITRS direction ``vec`` (..., 3) seen from lat/lon."""
+    vec = np.asarray(vec, dtype=float)
     east, north, up = enu_basis(lat_deg, lon_deg)
     e = np.sum(vec * east, axis=-1)
     n = np.sum(vec * north, axis=-1)
@@ -129,18 +135,21 @@ def alt_az(vec, lat_deg, lon_deg):
     return alt, az
 
 
-def angular_separation(a, b):
+def angular_separation(a: ArrayLike, b: ArrayLike) -> NDArray[np.float64]:
     """Angle (radians) between vectors ``a`` and ``b`` along the last axis; stable near 0 and pi."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
     cross = np.linalg.norm(np.cross(a, b), axis=-1)
     return np.arctan2(cross, np.sum(a * b, axis=-1))
 
 
-def eclipse_magnitude(sep, r_sun, r_moon):
+def eclipse_magnitude(sep: ArrayLike, r_sun: ArrayLike, r_moon: ArrayLike) -> NDArray[np.float64]:
     """Fraction of the Sun's diameter covered: ``(r_sun + r_moon - sep) / (2 r_sun)``, floored at 0."""
+    sep, r_sun, r_moon = (np.asarray(x, dtype=float) for x in (sep, r_sun, r_moon))
     return np.maximum((r_sun + r_moon - sep) / (2.0 * r_sun), 0.0)
 
 
-def obscuration(sep, r_sun, r_moon):
+def obscuration(sep: ArrayLike, r_sun: ArrayLike, r_moon: ArrayLike) -> NDArray[np.float64]:
     """Fraction of the Sun's disc area covered by the Moon (flat-sky circle overlap)."""
     d, r1, r2 = np.broadcast_arrays(*(np.asarray(x, dtype=float) for x in (sep, r_sun, r_moon)))
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -156,7 +165,9 @@ def obscuration(sep, r_sun, r_moon):
 # --- Skyfield ----------------------------------------------------------------
 
 
-def body_track(eph, ts, start_utc: datetime, end_utc: datetime, step_s=1.0) -> BodyTrack:
+def body_track(
+    eph: SpiceKernel, ts: Timescale, start_utc: datetime, end_utc: datetime, step_s: float = 1.0
+) -> BodyTrack:
     """Sample geocentric apparent Sun and Moon ITRS positions from ``start_utc`` to ``end_utc``.
 
     Datetimes must be timezone-aware. The window must contain every
@@ -167,17 +178,33 @@ def body_track(eph, ts, start_utc: datetime, end_utc: datetime, step_s=1.0) -> B
     n = int(round((end_utc - start_utc).total_seconds() / step_s)) + 1
     t0 = ts.from_datetime(start_utc)
     t = ts.tt_jd(t0.tt + np.arange(n) * (step_s / 86400.0))
-    earth = eph["earth"].at(t)
-    sun = earth.observe(eph["sun"]).apparent().frame_xyz(itrs).m.T
-    moon = earth.observe(eph["moon"]).apparent().frame_xyz(itrs).m.T
+    earth = cast(Barycentric, eph["earth"].at(t))
+    sun = _itrs_m(earth.observe(eph["sun"]).apparent())
+    moon = _itrs_m(earth.observe(eph["moon"]).apparent())
     t0_utc = np.datetime64(start_utc.replace(tzinfo=None), "ms")
     return BodyTrack(t0_utc=t0_utc, step_s=float(step_s), sun_m=sun, moon_m=moon)
+
+
+def _itrs_m(position: Apparent) -> NDArray[np.float64]:
+    """(n, 3) ITRS coordinates in metres.
+
+    ``Distance.m`` is a lazily computed attribute that type checkers read as
+    a method, hence the cast.
+    """
+    return cast(NDArray[np.float64], position.frame_xyz(itrs).m).T
 
 
 # --- local circumstances -----------------------------------------------------
 
 
-def local_circumstances(lat_deg, lon_deg, height_m, track: BodyTrack, coarse_s=30.0, chunk=20_000):
+def local_circumstances(
+    lat_deg: ArrayLike,
+    lon_deg: ArrayLike,
+    height_m: ArrayLike,
+    track: BodyTrack,
+    coarse_s: float = 30.0,
+    chunk: int = 20_000,
+) -> LocalCircumstances:
     """Circumstances at maximum eclipse for observers at (lat, lon, height). Inputs broadcast."""
     lat, lon, h = np.broadcast_arrays(*(np.asarray(x, dtype=float) for x in (lat_deg, lon_deg, height_m)))
     shape = lat.shape
@@ -196,13 +223,15 @@ def local_circumstances(lat_deg, lon_deg, height_m, track: BodyTrack, coarse_s=3
     return LocalCircumstances(t_max_utc=t_max, **fields)
 
 
-def _sep_at(track, idx, obs):
+def _sep_at(track: BodyTrack, idx: NDArray[np.intp], obs: NDArray[np.float64]) -> NDArray[np.float64]:
     """Topocentric Sun-Moon separation (rad) at sample indices ``idx`` (P, k) for observers ``obs`` (P, 3)."""
     o = obs[:, None, :]
     return angular_separation(track.sun_m[idx] - o, track.moon_m[idx] - o)
 
 
-def _circumstances_chunk(lat, lon, h, track, coarse_s):
+def _circumstances_chunk(
+    lat: NDArray[np.float64], lon: NDArray[np.float64], h: NDArray[np.float64], track: BodyTrack, coarse_s: float
+) -> dict[str, NDArray[Any]]:
     n = len(track)
     obs = observer_itrs(lat, lon, h)
     rows = np.arange(lat.size)
@@ -257,7 +286,7 @@ def _circumstances_chunk(lat, lon, h, track, coarse_s):
     return out
 
 
-def _totality_duration(track, obs, k, g_min):
+def _totality_duration(track: BodyTrack, obs: NDArray[np.float64], k: NDArray[np.intp], g_min: NDArray[np.float64]) -> NDArray[np.float64]:
     """Seconds during which ``sep < r_moon - r_sun``; 0 where that never happens, NaN if out of window."""
     n = len(track)
     duration = np.zeros(k.shape)
@@ -278,7 +307,7 @@ def _totality_duration(track, obs, k, g_min):
     g[:, w] = np.minimum(g[:, w], g_min[total])
     g[(raw < 0) | (raw > n - 1)] = np.nan  # outside the track: crossing cannot be found
 
-    def crossing(side):
+    def crossing(side: NDArray[np.float64]) -> NDArray[np.float64]:
         # side: g from the centre outward, shape (P, w+1); find first sample with g >= 0.
         nonneg = side >= 0
         found = nonneg.any(axis=1)

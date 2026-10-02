@@ -19,6 +19,9 @@ line of sight* and terrain obstruction toward the event's azimuth.
 - Python 3.11+, virtual environment in .venv, dependencies in pyproject.toml.
 - Core physics in small, pure, unit-tested functions; data I/O kept separate.
 - Use numpy/xarray, vectorised over the grid.
+- Use type hints on all function signatures (including tests): `ArrayLike`
+  for array inputs, `NDArray[...]` for array outputs. Keep `cast` for untyped
+  third-party returns (e.g. Skyfield) and comment why.
 - Tests with pytest; check geometry against hand calculations.
 - Raw downloaded data goes in data/raw/ and is git-ignored.
 - Never commit credentials (CDS API key lives in ~/.cdsapirc).
@@ -30,3 +33,7 @@ line of sight* and terrain obstruction toward the event's azimuth.
   and key assumptions in the same branch/PR as any change that affects them.
 - Always use the project venv (macOS): `.venv/bin/python -m pip ...` and
   `.venv/bin/python -m pytest`.
+- Before finishing any change, check the VS Code Problems panel and fix every
+  error. It only covers open files, so also run `.venv/bin/pyright` (same
+  settings, from `[tool.pyright]` in pyproject.toml) over src/ and tests/ and
+  get it to 0 errors.

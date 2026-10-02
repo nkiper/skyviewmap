@@ -8,9 +8,12 @@ need DE440s in data/raw/skyfield.
 
 import math
 from datetime import datetime, timezone
+from typing import cast
 
 import numpy as np
 import pytest
+from skyfield.jpllib import SpiceKernel
+from skyfield.timelib import Timescale
 
 from skyviewmapper.constants import R_MOON_M, R_SUN_M
 from skyviewmapper.ephemeris import (
@@ -35,7 +38,7 @@ from skyviewmapper.ephemeris import (
         (90.0, 0.0, 0.0, (0.0, 0.0, 6_356_752.314245)),  # polar radius b = a(1 - f)
     ],
 )
-def test_observer_itrs(lat, lon, h, xyz):
+def test_observer_itrs(lat: float, lon: float, h: float, xyz: tuple[float, float, float]) -> None:
     np.testing.assert_allclose(observer_itrs(lat, lon, h), xyz, atol=1e-6)
 
 
@@ -51,13 +54,13 @@ def test_observer_itrs(lat, lon, h, xyz):
         ((1.0, -1.0, 0.0), 45.0, 270.0),  # halfway up, due west
     ],
 )
-def test_alt_az_at_equator(vec, alt_ref, az_ref):
+def test_alt_az_at_equator(vec: tuple[float, float, float], alt_ref: float, az_ref: float) -> None:
     alt, az = alt_az(np.array(vec), 0.0, 0.0)
     assert alt == pytest.approx(alt_ref, abs=1e-12)
     assert az == pytest.approx(az_ref, abs=1e-12)
 
 
-def test_alt_az_zenith_at_mid_latitude():
+def test_alt_az_zenith_at_mid_latitude() -> None:
     lat, lon = 40.0, -3.0
     up = np.array(
         [math.cos(math.radians(lat)) * math.cos(math.radians(lon)),
@@ -68,7 +71,7 @@ def test_alt_az_zenith_at_mid_latitude():
     assert alt == pytest.approx(90.0, abs=1e-9)
 
 
-def test_angular_separation():
+def test_angular_separation() -> None:
     assert angular_separation(np.array([1.0, 0, 0]), np.array([0, 1.0, 0])) == pytest.approx(math.pi / 2)
     # Stable for tiny angles, where arccos of a dot product would lose precision.
     assert angular_separation(np.array([1.0, 0, 0]), np.array([1.0, 1e-9, 0])) == pytest.approx(1e-9, rel=1e-6)
@@ -82,7 +85,7 @@ def test_angular_separation():
         (3.0, 1.0, 1.0, 0.0),  # no contact
     ],
 )
-def test_eclipse_magnitude(sep, rs, rm, mag):
+def test_eclipse_magnitude(sep: float, rs: float, rm: float, mag: float) -> None:
     assert eclipse_magnitude(sep, rs, rm) == pytest.approx(mag)
 
 
@@ -98,7 +101,7 @@ def test_eclipse_magnitude(sep, rs, rm, mag):
         (1.0, 1.0, 1.0, 2 / 3 - math.sqrt(3) / (2 * math.pi)),  # 0.391002
     ],
 )
-def test_obscuration(sep, rs, rm, obsc):
+def test_obscuration(sep: float, rs: float, rm: float, obsc: float) -> None:
     assert obscuration(sep, rs, rm) == pytest.approx(obsc, abs=1e-12)
 
 
@@ -114,7 +117,7 @@ T0_UTC = np.datetime64("2026-08-12T18:00:00", "ms")
 R_S, R_M, V = 0.0045, 0.0047, 2.5e-6  # rad, rad, rad/s
 
 
-def synthetic_track(t0_s, b, n=401):
+def synthetic_track(t0_s: float, b: float, n: int = 401) -> BodyTrack:
     obs = observer_itrs(0.0, 0.0, 0.0)
     t = np.arange(n, dtype=float)
     sun = obs + (R_SUN_M / math.sin(R_S)) * np.array([1.0, 0.0, 0.0]) * np.ones((n, 1))
@@ -132,7 +135,7 @@ def synthetic_track(t0_s, b, n=401):
         (0.0, 160.000002),
     ],
 )
-def test_synthetic_max_time_and_totality(b, duration):
+def test_synthetic_max_time_and_totality(b: float, duration: float) -> None:
     c = local_circumstances(0.0, 0.0, 0.0, synthetic_track(200.3, b))
     assert (c.t_max_utc - T0_UTC) / np.timedelta64(1, "ms") == pytest.approx(200_300, abs=1)
     assert c.separation_deg == pytest.approx(math.degrees(math.atan(b)), abs=1e-9)
@@ -145,14 +148,14 @@ def test_synthetic_max_time_and_totality(b, duration):
     assert c.totality_s == pytest.approx(duration, abs=0.01)
 
 
-def test_synthetic_partial_has_zero_totality():
+def test_synthetic_partial_has_zero_totality() -> None:
     b = 3e-4  # > r_m - r_s, so never total
     c = local_circumstances(0.0, 0.0, 0.0, synthetic_track(200.3, b))
     assert c.totality_s == 0.0
     assert 0.0 < c.obscuration < 1.0
 
 
-def test_maximum_outside_track_is_nan():
+def test_maximum_outside_track_is_nan() -> None:
     c = local_circumstances(0.0, 0.0, 0.0, synthetic_track(450.0, 1e-4))
     assert np.isnat(c.t_max_utc)
     assert np.isnan(c.magnitude)
@@ -161,7 +164,7 @@ def test_maximum_outside_track_is_nan():
 # --- NASA central line -------------------------------------------------------
 
 
-def dms(deg, minutes):
+def dms(deg: float, minutes: float) -> float:
     return math.copysign(abs(deg) + minutes / 60.0, deg)
 
 
@@ -175,7 +178,7 @@ NASA_CENTRAL_LINE = [
 
 
 @pytest.fixture(scope="module")
-def nasa_track(nasa_ephemeris):
+def nasa_track(nasa_ephemeris: tuple[SpiceKernel, Timescale]) -> tuple[Timescale, BodyTrack]:
     eph, ts = nasa_ephemeris
     start = datetime(2026, 8, 12, 18, 10, tzinfo=timezone.utc)
     end = datetime(2026, 8, 12, 18, 45, tzinfo=timezone.utc)
@@ -184,12 +187,23 @@ def nasa_track(nasa_ephemeris):
 
 @pytest.mark.ephemeris
 @pytest.mark.parametrize("ut, lat, lon, alt, az, ratio, duration", NASA_CENTRAL_LINE)
-def test_nasa_central_line(nasa_track, ut, lat, lon, alt, az, ratio, duration):
+def test_nasa_central_line(
+    nasa_track: tuple[Timescale, BodyTrack],
+    ut: str,
+    lat: float,
+    lon: float,
+    alt: float,
+    az: float,
+    ratio: float | None,
+    duration: float,
+) -> None:
     ts, track = nasa_track
     c = local_circumstances(lat, lon, 0.0, track)
 
     hh, mm = map(int, ut.split(":"))
-    expected = np.datetime64(ts.ut1(2026, 8, 12, hh, mm, 0).utc_datetime().replace(tzinfo=None), "ms")
+    # NASA times are UT1; convert to UTC with the same Delta T. Scalar Time -> datetime.
+    expected_utc = cast(datetime, ts.ut1(2026, 8, 12, hh, mm, 0).utc_datetime())
+    expected = np.datetime64(expected_utc.replace(tzinfo=None), "ms")
     assert abs((c.t_max_utc - expected) / np.timedelta64(1, "ms")) < 1_000
     assert c.separation_deg * 3600 < 3.0  # on the central line
     assert c.sun_alt_deg == pytest.approx(alt, abs=0.6)  # table rounds to 1 deg
@@ -200,7 +214,7 @@ def test_nasa_central_line(nasa_track, ut, lat, lon, alt, az, ratio, duration):
 
 
 @pytest.mark.ephemeris
-def test_partial_eclipse_seville(nasa_track):
+def test_partial_eclipse_seville(nasa_track: tuple[Timescale, BodyTrack]) -> None:
     # Published magnitude ~0.951 (timeanddate / theskylive; exact site unknown).
     _, track = nasa_track
     c = local_circumstances(37.389, -5.984, 0.0, track)
@@ -209,7 +223,7 @@ def test_partial_eclipse_seville(nasa_track):
 
 
 @pytest.mark.ephemeris
-def test_grid_shape_and_coverage(nasa_track):
+def test_grid_shape_and_coverage(nasa_track: tuple[Timescale, BodyTrack]) -> None:
     _, track = nasa_track
     lat, lon = np.meshgrid(np.arange(36.0, 44.01, 0.5), np.arange(-10.0, 4.51, 0.5), indexing="ij")
     c = local_circumstances(lat, lon, 0.0, track)

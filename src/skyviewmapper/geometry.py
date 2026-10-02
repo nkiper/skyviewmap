@@ -24,6 +24,7 @@ accept numpy arrays and broadcast their arguments against each other.
 from typing import NamedTuple
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 from .constants import R_EARTH_M
 
@@ -31,13 +32,15 @@ from .constants import R_EARTH_M
 class LayerCrossing(NamedTuple):
     """Where a line of sight crosses a layer height. NaN where it never does."""
 
-    lat: np.ndarray
-    lon: np.ndarray
-    ground_distance_m: np.ndarray
-    slant_range_m: np.ndarray
+    lat: NDArray[np.float64]
+    lon: NDArray[np.float64]
+    ground_distance_m: NDArray[np.float64]
+    slant_range_m: NDArray[np.float64]
 
 
-def slant_range_to_height(alt_deg, layer_h, observer_h=0.0, R=R_EARTH_M):
+def slant_range_to_height(
+    alt_deg: ArrayLike, layer_h: ArrayLike, observer_h: ArrayLike = 0.0, R: float = R_EARTH_M
+) -> NDArray[np.float64]:
     """Distance along the line of sight from the observer to radius ``R + layer_h``.
 
     With r0 = R + observer_h and r1 = R + layer_h, the law of cosines gives
@@ -78,7 +81,9 @@ def slant_range_to_height(alt_deg, layer_h, observer_h=0.0, R=R_EARTH_M):
     return s
 
 
-def central_angle(slant_range, alt_deg, observer_h=0.0, R=R_EARTH_M):
+def central_angle(
+    slant_range: ArrayLike, alt_deg: ArrayLike, observer_h: ArrayLike = 0.0, R: float = R_EARTH_M
+) -> NDArray[np.float64]:
     """Earth-centre angle (radians) between the observer and a point on the ray.
 
     The point lies ``slant_range`` along the ray, so relative to the Earth's
@@ -92,7 +97,9 @@ def central_angle(slant_range, alt_deg, observer_h=0.0, R=R_EARTH_M):
     return np.arctan2(s * np.cos(a), r0 + s * np.sin(a))
 
 
-def destination_point(lat_deg, lon_deg, az_deg, theta):
+def destination_point(
+    lat_deg: ArrayLike, lon_deg: ArrayLike, az_deg: ArrayLike, theta: ArrayLike
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Point reached by going ``theta`` radians of arc from (lat, lon) on initial bearing ``az``.
 
     Spherical great-circle direct problem. Returns (lat, lon) in degrees with
@@ -113,7 +120,15 @@ def destination_point(lat_deg, lon_deg, az_deg, theta):
     return np.degrees(phi2), lon2
 
 
-def los_layer_crossing(lat_deg, lon_deg, alt_deg, az_deg, layer_h, observer_h=0.0, R=R_EARTH_M):
+def los_layer_crossing(
+    lat_deg: ArrayLike,
+    lon_deg: ArrayLike,
+    alt_deg: ArrayLike,
+    az_deg: ArrayLike,
+    layer_h: ArrayLike,
+    observer_h: ArrayLike = 0.0,
+    R: float = R_EARTH_M,
+) -> LayerCrossing:
     """Where the line of sight toward (alt, az) crosses height ``layer_h``.
 
     Combines :func:`slant_range_to_height`, :func:`central_angle` and
@@ -126,7 +141,9 @@ def los_layer_crossing(lat_deg, lon_deg, alt_deg, az_deg, layer_h, observer_h=0.
     return LayerCrossing(lat=lat, lon=lon, ground_distance_m=R * theta, slant_range_m=s)
 
 
-def flat_earth_ground_distance(alt_deg, layer_h, observer_h=0.0):
+def flat_earth_ground_distance(
+    alt_deg: ArrayLike, layer_h: ArrayLike, observer_h: ArrayLike = 0.0
+) -> NDArray[np.float64]:
     """Flat-Earth horizontal distance ``(layer_h - observer_h) / tan(alt)``.
 
     For comparison and testing only; it overestimates the distance at low

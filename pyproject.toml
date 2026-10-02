@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pyright",
 ]
 
 [tool.pytest.ini_options]
@@ -23,3 +24,10 @@ testpaths = ["tests"]
 markers = [
     "ephemeris: needs the DE440s file in data/raw/skyfield (skipped if absent)",
 ]
+
+# Shared by Pylance (VS Code Problems panel) and the pyright CLI.
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
