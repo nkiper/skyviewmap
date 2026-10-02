@@ -269,6 +269,12 @@ def cell_spots(dem: Dem, grid: Grid) -> tuple[NDArray[np.intp], NDArray[np.intp]
     return rows, cols
 
 
+def cell_ground_height(dem: Dem, grid: Grid) -> NDArray[np.float64]:
+    """Median DEM height (m) of each cell's 3x3 typical spots (0 m over sea)."""
+    rows, cols = cell_spots(dem, grid)
+    return np.median(np.asarray(dem.heights[rows[..., :9], cols[..., :9]], dtype=float), axis=-1)
+
+
 def terrain_visibility(
     pyramid: list[Dem],
     grid: Grid,

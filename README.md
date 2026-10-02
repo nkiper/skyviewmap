@@ -21,8 +21,8 @@ overhead. The model therefore looks up cloud cover where the ray crosses each la
 | 3. Terrain horizon mask (Copernicus DEM) | ✅ done |
 | 3b. Multiple regions (Iberia + Iceland) | ✅ done |
 | 4. ERA5 low/mid/high cloud climatology | ✅ done |
-| 5. Cloud sampled along the line of sight, layers combined | ⏳ next |
-| 6. End-to-end pipeline and P(clear view) map | — |
+| 5. Cloud sampled along the line of sight, layers combined | ✅ done |
+| 6. End-to-end pipeline and P(clear view) map | ⏳ next |
 
 ## Setup
 Requires Python 3.11+.
@@ -53,6 +53,7 @@ src/skyviewmapper/
   regions.py     regions (Iberia, Iceland): grid, DEM extent, ephemeris time window
   terrain.py     horizon toward the Sun per spot; per-cell terrain visibility
   climatology.py summary statistics of the cloud samples (layer means, overhead P(clear))
+  los_cloud.py   P(cloud-free line of sight to the Sun) from the cloud samples
   io/            data loading (skyfield_data.py: JPL ephemeris; dem.py: Copernicus GLO-90;
                  era5.py: ERA5 cloud cover from the CDS)
 tests/           pytest, checked against hand calculations and NASA tables
@@ -63,9 +64,9 @@ data/, outputs/  downloaded data and results (git-ignored)
 - Spherical Earth with mean radius 6 371 km. Heights are measured above sea level.
 - Each observer is evaluated at its own time of maximum eclipse. Observer
   positions for the ephemeris use WGS84; Sun/Moon radii follow NASA's tables.
-- The line of sight is a straight ray. The ephemeris returns both geometric and
-  refracted (standard conditions) Sun altitude; which one feeds the cloud step
-  is decided in milestone 5.
+- Refraction: terrain and cloud steps both use the Sun's apparent (refracted,
+  standard conditions) altitude with a straight ray over an effective Earth
+  radius R/(1−k), k = 0.13. The ephemeris also returns the geometric altitude.
 - Terrain: Copernicus GLO-90 (90 m). The terrain's elevation angle uses an
   effective Earth radius R/(1−k), k = 0.13, and is compared with the Sun's
   apparent altitude. Each cell (0.01°; 0.01° × 0.02° in Iceland, ~1 km) tests
@@ -76,6 +77,20 @@ data/, outputs/  downloaded data and results (git-ignored)
   pixels widen above 50°N: 6″ in Iceland vs 3″ in Iberia).
 - Cloud: ERA5 hourly low/medium/high cloud cover (0.25°), 1996–2025, 5–19 August,
   at the two full hours bracketing the eclipse (18–19 UT Iberia, 17–18 UT
-  Iceland). Every sample is kept: layers are combined per sample assuming
-  random overlap, P(clear) = (1 − low)(1 − mid)(1 − high), and only then
-  averaged, because cloud layers are correlated in time.
+  Iceland), interpolated in time to each cell's maximum eclipse. Every
+  sample is kept: layers are combined per sample assuming random overlap,
+  P(clear) = Π(clear chance of each layer), and only then averaged, because
+  cloud layers are correlated in time.
+- Line of sight: each layer is a slab above the observer's ground (low 0–2 km,
+  mid 2–6 km, high 6–12 km), read at three heights where the sight line
+  crosses it (apparent Sun altitude, effective Earth radius as for terrain).
+  At the eclipse's low Sun the high layer is crossed 50–400 km away in Iberia.
+- Slant-path correction (uncertain): clouds are modelled as randomly placed
+  cylinders with height/width ratio β (0.5 low, 0.3 mid, 0.1 high), so a slanted
+  sight line also meets cloud sides: a layer of cover n is passed with chance
+  (1 − n)^(1 + (4β/π)·cot θ). It is supported by satellite view-angle studies
+  up to ~70° from the zenith but extrapolated to the eclipse's 2–25°, and it
+  lowers P(clear) a lot (Iberian land mean 0.69 → 0.51, Iceland 0.18 → 0.10).
+  Results are therefore given with and without it.
+- The cloud term is computed on a 5× coarser grid (0.05°) and interpolated to
+  the map grid; ERA5 itself is 0.25°.

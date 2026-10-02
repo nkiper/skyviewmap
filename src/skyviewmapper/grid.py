@@ -50,3 +50,29 @@ class Grid:
         """2-D (lat, lon) arrays of cell centres, shape ``self.shape``."""
         lat, lon = np.meshgrid(self.lats, self.lons, indexing="ij")
         return lat, lon
+
+
+def resample_bilinear(values: NDArray[np.float64], src: Grid, dst: Grid) -> NDArray[np.float64]:
+    """Bilinearly interpolate cell-centre ``values`` on ``src`` to the cell centres of ``dst``.
+
+    Destination centres beyond the outermost source centres take the edge
+    value (no extrapolation).
+    """
+    values = np.asarray(values, dtype=float)
+
+    def axis(x: NDArray[np.float64], x0: float, dx: float, n: int) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+        pos = np.clip((x - x0) / dx, 0.0, n - 1.0)
+        i = np.minimum(np.floor(pos).astype(np.intp), max(n - 2, 0))
+        return i, pos - i
+
+    i, fy = axis(dst.lats, float(src.lats[0]), src.dlat, src.shape[0])
+    j, fx = axis(dst.lons, float(src.lons[0]), src.dlon, src.shape[1])
+    i1 = np.minimum(i + 1, src.shape[0] - 1)
+    j1 = np.minimum(j + 1, src.shape[1] - 1)
+    fy, fx = fy[:, None], fx[None, :]
+    return (
+        values[np.ix_(i, j)] * (1 - fy) * (1 - fx)
+        + values[np.ix_(i, j1)] * (1 - fy) * fx
+        + values[np.ix_(i1, j)] * fy * (1 - fx)
+        + values[np.ix_(i1, j1)] * fy * fx
+    )
