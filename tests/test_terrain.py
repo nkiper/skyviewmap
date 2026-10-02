@@ -148,6 +148,22 @@ def test_cell_spots() -> None:
     assert sorted(set(cols[1, 2, :9].tolist())) == [26, 30, 34]
 
 
+
+@pytest.mark.parametrize("res_lon, n_lon", [(0.01, 6), (0.02, 12)])
+def test_cell_spots_non_square_pixels(res_lon: float, n_lon: int) -> None:
+    # Iceland-style tiles: 3" in latitude, 6" in longitude (1200 x 600 px).
+    dem = Dem(np.full((24, 4 * n_lon), 100, np.int16), lat0=0.02 - PX / 2, lon0=PX, dlat=PX, dlon=2 * PX)
+    grid = Grid(0.0, 0.02, 0.0, 4 * res_lon, 0.01, res_lon=res_lon)
+    assert grid.shape == (2, 4)
+    dem.heights[13, 2 * n_lon + 1] = 500  # southern cell row, cell column 2
+    rows, cols = cell_spots(dem, grid)
+    assert (rows[0, 2, 9], cols[0, 2, 9]) == (13, 2 * n_lon + 1)
+    # 3x3 pattern spreads over the cell's n_lon columns: offsets round((k + 0.5) n / 3 - 0.5).
+    expected = [2 * n_lon + round((k + 0.5) * n_lon / 3 - 0.5) for k in range(3)]
+    assert sorted(set(cols[0, 2, :9].tolist())) == expected
+    assert sorted(set(rows[0, 2, :9].tolist())) == [14, 18, 22]
+
+
 def visibility_scene(hill: bool = True) -> tuple[list[Dem], Grid]:
     """Flat 100 m land, a 1 000 m wall ~21 km west, a 600 m hill pixel in one cell, one sea cell."""
     dem = flat_dem(-0.05, 0.05, -0.3, 0.05, h=100)
@@ -191,24 +207,33 @@ def test_highest_point_can_see_over_the_wall() -> None:
 
 @pytest.mark.dem
 @pytest.mark.parametrize(
-    "name, lat, lon, height",
+    "name, lat, lon, height, max_offset_m",
     [
-        ("Mulhacen", 37.0533, -3.3113, 3_479),
-        ("Aneto", 42.6308, 0.6578, 3_404),
+        # Sharp rock summits: the highest pixel should be the summit pixel.
+        ("Mulhacen", 37.0533, -3.3113, 3_479, 150.0),
+        ("Aneto", 42.6308, 0.6578, 3_404, 150.0),
+        # Ice-capped caldera rim (64 00 57 N, 16 40 29 W) on 6" x 3" tiles: the
+        # highest ice pixel in the 2011-15 DSM sits ~250 m from the surveyed
+        # summit. A georeferencing error on these narrower tiles would show up
+        # as a whole-pixel-width multiple or km-scale offset, which this catches.
+        ("Hvannadalshnukur", 64.01583, -16.67472, 2_110, 300.0),
     ],
 )
-def test_summit_heights(name: str, lat: float, lon: float, height: int) -> None:
+def test_summit_heights(name: str, lat: float, lon: float, height: int, max_offset_m: float) -> None:
     lat_s, lon_w = math.floor(lat), math.floor(lon)
     if not (TILE_DIR / f"{tile_name(lat_s, lon_w)}.tif").exists():
         pytest.skip("GLO-90 tile not downloaded")
     dem = build_mosaic(lat_s, lat_s + 1, lon_w, lon_w + 1)
-    # The highest pixel within ~1 km must sit on the published summit (+-1 px).
+    # The highest pixel within ~0.5 km must sit close to the published summit.
     r = round((dem.lat0 - lat) / dem.dlat)
     c = round((lon - dem.lon0) / dem.dlon)
     w = 6
     win = np.asarray(dem.heights[r - w : r + w + 1, c - w : c + w + 1])
     i, j = np.unravel_index(win.argmax(), win.shape)
-    assert abs(i - w) <= 1 and abs(j - w) <= 1, name
-    # GLO-90 heights are 3" averages of the 30 m DEM, which flattens sharp
-    # summits: Mulhacen comes out 19 m low, the Aneto pinnacle 48 m low.
+    m_per_deg = math.radians(1.0) * R_EARTH_M
+    dy = (i - w) * dem.dlat * m_per_deg
+    dx = (j - w) * dem.dlon * m_per_deg * math.cos(math.radians(lat))
+    assert math.hypot(dx, dy) <= max_offset_m, name
+    # GLO-90 heights are averages of the 30 m DEM, which flattens summits:
+    # Mulhacen comes out 19 m low, Aneto 48 m, Hvannadalshnukur 29 m.
     assert height - 60 <= int(win.max()) <= height + 10, name

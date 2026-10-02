@@ -170,6 +170,10 @@ def dms(deg: float, minutes: float) -> float:
 
 # (UT1 hh:mm, lat, lon, Sun alt, Sun az, Moon/Sun diameter ratio, duration s)
 NASA_CENTRAL_LINE = [
+    # Just west of Iceland (at sea).
+    ("17:46", dms(65, 10.3), dms(-25, 12.3), 26, 248, 1.039, 138.2),
+    ("17:48", dms(64, 10.1), dms(-24, 45.4), 26, 250, 1.039, 138.1),
+    # Iberia.
     ("18:26", dms(44, 42.8), dms(-8, 23.9), 13, 278, 1.034, 113.0),
     ("18:28", dms(43, 22.3), dms(-6, 11.3), 10, 281, 1.034, 109.3),
     ("18:30", dms(41, 49.0), dms(-3, 11.1), 8, 283, 1.033, 104.6),
@@ -180,7 +184,7 @@ NASA_CENTRAL_LINE = [
 @pytest.fixture(scope="module")
 def nasa_track(nasa_ephemeris: tuple[SpiceKernel, Timescale]) -> tuple[Timescale, BodyTrack]:
     eph, ts = nasa_ephemeris
-    start = datetime(2026, 8, 12, 18, 10, tzinfo=timezone.utc)
+    start = datetime(2026, 8, 12, 17, 20, tzinfo=timezone.utc)
     end = datetime(2026, 8, 12, 18, 45, tzinfo=timezone.utc)
     return ts, body_track(eph, ts, start, end)
 

@@ -1,13 +1,16 @@
 """Copernicus GLO-90 DEM: download tiles and build a lat/lon mosaic.
 
 Tiles come from the public AWS bucket ``copernicus-dem-90m`` (no account),
-1 deg x 1 deg, 1200 x 1200 pixels at 3 arcsec for latitudes below 50 deg.
+1 deg x 1 deg, 1200 rows at 3 arcsec. Pixels widen in longitude toward the
+poles (Copernicus latitude bands): 3" below 50 deg, then 4.5", 6", 9", 15"
+and 30", i.e. 1200, 800, 600, 400, 240 or 120 columns. A mosaic must lie
+within one band so it stays a regular grid.
 Ocean-only tiles do not exist (HTTP 404); a ``.missing`` marker is written so
 they are not requested again, and the mosaic is filled with 0 m there.
 
 Heights are metres above the EGM2008 geoid, rounded to int16 in the mosaic.
-Tiles are pixel-is-point: pixel centres lie on multiples of 3 arcsec, with
-the first one on the tile's NW corner (GDAL reports the transform shifted by
+Tiles are pixel-is-point: pixel centres lie on multiples of the pixel size,
+with the first one on the tile's NW corner (GDAL reports the transform shifted by
 half a pixel accordingly); this is checked for every tile.
 """
 
@@ -22,8 +25,10 @@ import rasterio
 from ..terrain import Dem
 
 BASE_URL = "https://copernicus-dem-90m.s3.amazonaws.com"
-TILE_PX = 1200
-PX_DEG = 1.0 / TILE_PX
+TILE_ROWS = 1200
+PX_DEG = 1.0 / TILE_ROWS  # latitude pixel size, all bands
+# (upper |lat| of band, longitude pixel size / latitude pixel size)
+_LON_BANDS = ((50, 1.0), (60, 1.5), (70, 2.0), (80, 3.0), (85, 5.0), (90, 10.0))
 _ROOT = Path(__file__).resolve().parents[3]
 TILE_DIR = _ROOT / "data" / "raw" / "dem" / "glo90"
 CACHE_DIR = _ROOT / "data" / "processed"
@@ -34,6 +39,17 @@ def tile_name(lat_south: int, lon_west: int) -> str:
     ns = "N" if lat_south >= 0 else "S"
     ew = "E" if lon_west >= 0 else "W"
     return f"Copernicus_DSM_COG_30_{ns}{abs(lat_south):02d}_00_{ew}{abs(lon_west):03d}_00_DEM"
+
+
+def lon_width_factor(lat_south: int) -> float:
+    """Longitude/latitude pixel-size ratio for the tile starting at ``lat_south``."""
+    equatorward = min(abs(lat_south), abs(lat_south + 1))
+    return next(f for top, f in _LON_BANDS if equatorward < top)
+
+
+def tile_cols(lat_south: int) -> int:
+    """Number of pixel columns in the tile starting at ``lat_south``."""
+    return int(round(TILE_ROWS / lon_width_factor(lat_south)))
 
 
 def _tile_ranges(lat_min: float, lat_max: float, lon_min: float, lon_max: float) -> tuple[range, range]:
@@ -77,7 +93,14 @@ def build_mosaic(
 ) -> Dem:
     """Mosaic downloaded tiles covering whole degrees around the box into one int16 array (row 0 = north)."""
     lats, lons = _tile_ranges(lat_min, lat_max, lon_min, lon_max)
-    heights = np.zeros((len(lats) * TILE_PX, len(lons) * TILE_PX), dtype=np.int16)
+    widths = {tile_cols(lat) for lat in lats}
+    if len(widths) != 1:
+        raise ValueError(
+            f"box {lat_min}..{lat_max} spans Copernicus latitude bands with different pixel widths; split it"
+        )
+    cols = widths.pop()
+    px_lon = 1.0 / cols
+    heights = np.zeros((len(lats) * TILE_ROWS, len(lons) * cols), dtype=np.int16)
     north, west = lats[-1] + 1, lons[0]
     for lat in lats:
         for lon in lons:
@@ -86,7 +109,7 @@ def build_mosaic(
                 continue
             with rasterio.open(path) as src:
                 t = src.transform
-                if src.shape != (TILE_PX, TILE_PX) or not np.allclose((t.a, -t.e), PX_DEG):
+                if src.shape != (TILE_ROWS, cols) or not np.allclose((t.a, -t.e), (px_lon, PX_DEG)):
                     raise ValueError(f"unexpected grid in {path.name}: {src.shape}, {t}")
                 # Tiles are pixel-is-point: the centre of pixel (0, 0) is the
                 # tile's NW corner, so the tile spans centres lat+1 .. lat+1/1200.
@@ -94,10 +117,10 @@ def build_mosaic(
                 if not np.allclose(centre, (lon, lat + 1), atol=1e-9):
                     raise ValueError(f"unexpected origin in {path.name}: {t}")
                 data = src.read(1)
-            r0 = (north - (lat + 1)) * TILE_PX
-            c0 = (lon - west) * TILE_PX
-            heights[r0 : r0 + TILE_PX, c0 : c0 + TILE_PX] = np.round(np.nan_to_num(data)).astype(np.int16)
-    return Dem(heights=heights, lat0=north, lon0=west, dlat=PX_DEG, dlon=PX_DEG)
+            r0 = (north - (lat + 1)) * TILE_ROWS
+            c0 = (lon - west) * cols
+            heights[r0 : r0 + TILE_ROWS, c0 : c0 + cols] = np.round(np.nan_to_num(data)).astype(np.int16)
+    return Dem(heights=heights, lat0=north, lon0=west, dlat=PX_DEG, dlon=px_lon)
 
 
 def load_dem(
@@ -121,7 +144,8 @@ def load_dem(
 
 
 if __name__ == "__main__":
-    from ..grid import SPAIN_DEM_BOX
+    from ..regions import REGIONS
 
-    tiles = download_tiles(*SPAIN_DEM_BOX)
-    print(f"{len(tiles)} GLO-90 tiles in {TILE_DIR}")
+    for region in REGIONS.values():
+        tiles = download_tiles(*region.dem_box)
+        print(f"{region.name}: {len(tiles)} GLO-90 tiles in {TILE_DIR}")
