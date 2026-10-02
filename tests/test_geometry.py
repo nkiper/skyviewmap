@@ -47,7 +47,7 @@ HAND_CASES = [
 
 
 @pytest.mark.parametrize("alt, H, h0, s_ref, d_ref", HAND_CASES)
-def test_hand_calculated_slant_and_ground_distance(alt, H, h0, s_ref, d_ref):
+def test_hand_calculated_slant_and_ground_distance(alt: float, H: float, h0: float, s_ref: float, d_ref: float) -> None:
     s = slant_range_to_height(alt, H, h0)
     d = R * central_angle(s, alt, h0)
     assert s == pytest.approx(s_ref, abs=DIST_TOL)
@@ -55,7 +55,7 @@ def test_hand_calculated_slant_and_ground_distance(alt, H, h0, s_ref, d_ref):
 
 
 @pytest.mark.parametrize("alt, H, h0, s_ref, d_ref", HAND_CASES)
-def test_crossing_lies_on_layer_sphere(alt, H, h0, s_ref, d_ref):
+def test_crossing_lies_on_layer_sphere(alt: float, H: float, h0: float, s_ref: float, d_ref: float) -> None:
     s = slant_range_to_height(alt, H, h0)
     a = math.radians(alt)
     r0 = R + h0
@@ -63,7 +63,7 @@ def test_crossing_lies_on_layer_sphere(alt, H, h0, s_ref, d_ref):
     assert r == pytest.approx(R + H, abs=1e-3)
 
 
-def test_layer_at_observer_height_is_zero_distance():
+def test_layer_at_observer_height_is_zero_distance() -> None:
     assert slant_range_to_height(10.0, 1_500.0, 1_500.0) == 0.0
 
 
@@ -76,23 +76,23 @@ def test_layer_at_observer_height_is_zero_distance():
         (-1.0, 1_000.0, 2_000.0),
     ],
 )
-def test_no_crossing_is_nan(alt, H, h0):
+def test_no_crossing_is_nan(alt: float, H: float, h0: float) -> None:
     c = los_layer_crossing(40.0, -3.0, alt, 270.0, H, h0)
     assert all(np.isnan(v) for v in c)
 
 
-def test_flat_earth_limit_at_high_altitude():
+def test_flat_earth_limit_at_high_altitude() -> None:
     d = R * central_angle(slant_range_to_height(45.0, 100.0), 45.0)
     assert d == pytest.approx(flat_earth_ground_distance(45.0, 100.0), rel=1e-3)
 
 
-def test_ground_distance_increases_as_altitude_decreases():
+def test_ground_distance_increases_as_altitude_decreases() -> None:
     alts = np.linspace(90.0, 0.0, 91)
     d = los_layer_crossing(40.0, -3.0, alts, 270.0, 9_000.0).ground_distance_m
     assert np.all(np.diff(d) > 0)
 
 
-def test_curvature_shortens_distance_vs_flat_earth():
+def test_curvature_shortens_distance_vs_flat_earth() -> None:
     alts = np.array([1.0, 5.0, 15.0])
     curved = los_layer_crossing(40.0, -3.0, alts, 270.0, 9_000.0).ground_distance_m
     flat = flat_earth_ground_distance(alts, 9_000.0)
@@ -116,13 +116,13 @@ ONE_DEG = math.radians(1.0)
         (40.0, 0.0, 90.0, 39.992678052768035, 1.3053139801813936),
     ],
 )
-def test_destination_point(lat, lon, az, lat_ref, lon_ref):
+def test_destination_point(lat: float, lon: float, az: float, lat_ref: float, lon_ref: float) -> None:
     lat2, lon2 = destination_point(lat, lon, az, ONE_DEG)
     assert lat2 == pytest.approx(lat_ref, abs=ANG_TOL)
     assert lon2 == pytest.approx(lon_ref, abs=ANG_TOL)
 
 
-def test_los_layer_crossing_end_to_end():
+def test_los_layer_crossing_end_to_end() -> None:
     # Observer near Madrid, Sun at 5 deg due west, high cloud at 9 km.
     # theta from the (5 deg, 9 km) case above, then destination_point by hand.
     c = los_layer_crossing(40.0, -3.0, 5.0, 270.0, 9_000.0)
@@ -132,7 +132,7 @@ def test_los_layer_crossing_end_to_end():
     assert c.lon == pytest.approx(-4.111544580138631, abs=ANG_TOL)
 
 
-def test_vectorised_grid_matches_scalar():
+def test_vectorised_grid_matches_scalar() -> None:
     lats = np.array([[36.0, 37.0], [42.0, 43.0]])[..., None]  # (2, 2, 1)
     lons = np.array([[-6.0, -2.0], [-8.0, 2.0]])[..., None]
     alts = np.array([[3.0, 6.0], [9.0, 12.0]])[..., None]

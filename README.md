@@ -29,6 +29,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python -m skyviewmapper.io.skyfield_data   # downloads DE440s ephemeris (~32 MB)
 .venv/bin/python -m pytest
+.venv/bin/pyright                                    # type check (0 errors expected)
 ```
 
 Tests marked `ephemeris` (checks against NASA's eclipse tables) are skipped
