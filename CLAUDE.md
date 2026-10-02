@@ -1,0 +1,30 @@
+# Eclipse visibility mapper
+
+## Goal
+Map where an astronomical event (first target: the 12 Aug 2026 eclipse over Spain)
+is most likely to be visible, accounting for historical cloud cover *along the
+line of sight* and terrain obstruction toward the event's azimuth.
+
+## Method (v1)
+- Ephemeris: Skyfield for event altitude/azimuth per grid point.
+- Terrain: ray-cast along the azimuth over a DEM (Copernicus GLO-30 or SRTM),
+  including Earth curvature and standard refraction.
+- Cloud: ERA5 hourly low/medium/high cloud cover, climatology for the date ±N days
+  at the event hour. Each layer is sampled where the line of sight crosses its
+  representative height. Layers are combined assuming random overlap (documented
+  as an assumption).
+- Output: P(clear view) map, terrain-blocked areas masked.
+
+## Conventions
+- Python 3.11+, virtual environment in .venv, dependencies in pyproject.toml.
+- Core physics in small, pure, unit-tested functions; data I/O kept separate.
+- Use numpy/xarray, vectorised over the grid.
+- Tests with pytest; check geometry against hand calculations.
+- Raw downloaded data goes in data/raw/ and is git-ignored.
+- Never commit credentials (CDS API key lives in ~/.cdsapirc).
+
+## Working style
+- Propose a plan before any non-trivial change; work in small steps.
+- State physical assumptions and approximations explicitly in docstrings.
+- Always use the project venv (macOS): `.venv/bin/python -m pip ...` and
+  `.venv/bin/python -m pytest`.
