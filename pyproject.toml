@@ -11,6 +11,7 @@ dependencies = [
     "cdsapi>=0.7.7",
     "numpy>=1.26",
     "skyfield>=1.49",
+    "rasterio>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "ephemeris: needs the DE440s file in data/raw/skyfield (skipped if absent)",
+    "dem: needs GLO-90 tiles in data/raw/dem/glo90 (skipped if absent)",
 ]
 
 # Shared by Pylance (VS Code Problems panel) and the pyright CLI.
