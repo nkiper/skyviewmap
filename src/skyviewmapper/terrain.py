@@ -16,7 +16,8 @@ Assumptions and approximations
   elevation-angle formula (central angle ``d / R_eff``).
 - Samples along the ray are spaced geometrically (each ``step_ratio`` times
   farther than the last). Each sample reads the finest max-pooled copy of
-  the DEM whose pixel is at least the sample spacing, so no pixel along the
+  the DEM whose pixel (its shorter side, at the mosaic's poleward edge) is
+  at least the sample spacing, so no pixel along the
   ray is skipped and narrow far peaks are kept. A pooled peak is placed at
   its pixel centre (up to ~2 sample spacings, i.e. ~6% of the distance, from
   its true position), and pooling spreads it sideways; both err slightly
@@ -201,7 +202,12 @@ def horizon_angle(
     if n_used == 0:
         return np.full(lat.shape, -np.inf)
 
-    base_px_m = np.radians(pyramid[0].dlat) * R_EARTH_M
+    # Smaller pixel side in metres, at the mosaic's poleward edge where
+    # longitude pixels are narrowest, so a level's pixels are at least the
+    # sample spacing in every direction.
+    base = pyramid[0]
+    poleward = max(abs(base.lat0), abs(base.lat0 - base.dlat * (base.heights.shape[0] - 1)))
+    base_px_m = np.radians(min(base.dlat, base.dlon * np.cos(np.radians(poleward)))) * R_EARTH_M
     level = _level_for_spacing(d * (step_ratio - 1.0), base_px_m, len(pyramid))
 
     lat2, lon2 = destination_point(lat[:, None], lon[:, None], az[:, None], d[None, :] / R_EARTH_M)
@@ -227,15 +233,15 @@ def cell_spots(dem: Dem, grid: Grid) -> tuple[NDArray[np.intp], NDArray[np.intp]
     (south, north] x [west, east); the cell size must be a whole number of
     pixels so every cell gets the same block.
     """
-    n_lat = grid.res / dem.dlat
-    n_lon = grid.res / dem.dlon
+    n_lat = grid.dlat / dem.dlat
+    n_lon = grid.dlon / dem.dlon
     if not (np.isclose(n_lat, round(n_lat)) and np.isclose(n_lon, round(n_lon))):
         raise ValueError("grid resolution must be a whole number of DEM pixels")
     n_lat, n_lon = int(round(n_lat)), int(round(n_lon))
 
     # Top-left DEM pixel of each cell. Cell rows run south->north, DEM rows north->south.
-    north_edge = grid.lat_min + (np.arange(grid.shape[0]) + 1) * grid.res
-    west_edge = grid.lon_min + np.arange(grid.shape[1]) * grid.res
+    north_edge = grid.lat_min + (np.arange(grid.shape[0]) + 1) * grid.dlat
+    west_edge = grid.lon_min + np.arange(grid.shape[1]) * grid.dlon
     # First pixel with centre <= north edge, and first with centre >= west edge.
     r0 = np.ceil((dem.lat0 - north_edge) / dem.dlat - 1e-6).astype(np.intp)
     c0 = np.ceil((west_edge - dem.lon0) / dem.dlon - 1e-6).astype(np.intp)
