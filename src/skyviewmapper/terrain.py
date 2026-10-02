@@ -73,6 +73,7 @@ class Dem:
 class TerrainVisibility:
     """Per-cell terrain visibility of the Sun. NaN for sea cells.
 
+    ``land_fraction``: share of the 3x3 typical spots that are on land.
     ``clear_fraction``: share of the 3x3 typical spots (land only) that see
     the Sun. ``best_*``: the spot (of the 9 typical + the highest pixel) with
     the largest margin = Sun apparent altitude - horizon angle (degrees;
@@ -81,6 +82,7 @@ class TerrainVisibility:
     """
 
     clear_fraction: NDArray[np.float64]
+    land_fraction: NDArray[np.float64]
     best_margin_deg: NDArray[np.float64]
     best_lat: NDArray[np.float64]
     best_lon: NDArray[np.float64]
@@ -332,6 +334,7 @@ def terrain_visibility(
 
     return TerrainVisibility(
         clear_fraction=np.where(sea, np.nan, clear_fraction),
+        land_fraction=n_typical / 9.0,
         best_margin_deg=at_best(margin),
         best_lat=at_best(spot_lat),
         best_lon=at_best(spot_lon),

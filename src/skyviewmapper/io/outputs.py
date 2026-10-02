@@ -21,6 +21,7 @@ TOP_SPOT_COLUMNS = (
     "p_clear_view_no_slant",
     "p_clear_sky",
     "clear_fraction",
+    "land_fraction",
     "t_max_utc",
     "sun_alt_apparent_deg",
     "sun_az_deg",
@@ -78,16 +79,27 @@ def _distance_km(lat1: float, lon1: float, lat2: np.ndarray, lon2: np.ndarray) -
 
 
 def top_spots(
-    ds: xr.Dataset, n: int = 25, min_separation_km: float = 20.0, min_totality_s: float = 60.0
+    ds: xr.Dataset,
+    n: int = 25,
+    min_separation_km: float = 20.0,
+    min_totality_s: float = 60.0,
+    min_land_fraction: float = 1.0 / 3.0,
 ) -> pd.DataFrame:
     """Best cells by ``p_clear_view`` with at least ``min_totality_s`` of totality, kept ``min_separation_km`` apart.
 
     The totality threshold keeps the list away from the edges of the path,
     where totality lasts only seconds and the exact limit is uncertain (lunar
-    limb profile, Delta T).
+    limb profile, Delta T). ``min_land_fraction`` (share of the cell's typical
+    spots on land) drops offshore rocks and islets, such as Eldey off
+    Reykjanes, that qualify only through a single land pixel.
     """
     p = ds["p_clear_view"].values
-    ok = np.isfinite(p) & ds["in_totality"].values.astype(bool) & (ds["totality_s"].values >= min_totality_s)
+    ok = (
+        np.isfinite(p)
+        & ds["in_totality"].values.astype(bool)
+        & (ds["totality_s"].values >= min_totality_s)
+        & (ds["land_fraction"].values >= min_land_fraction - 1e-9)
+    )
     flat = np.flatnonzero(ok)
     order = flat[np.argsort(-p.ravel()[flat], kind="stable")]
     lat = ds["best_lat"].values.ravel()
@@ -101,6 +113,7 @@ def top_spots(
         chosen.append(int(i))
     table = pd.DataFrame({c: ds[c].values.ravel()[chosen] for c in TOP_SPOT_COLUMNS})
     table.insert(0, "rank", np.arange(1, len(chosen) + 1))
+    table.attrs["min_totality_s"] = min_totality_s
     return table
 
 
@@ -113,7 +126,8 @@ def write_outputs(ds: xr.Dataset, out_dir: Path | None = None, min_totality_s: f
     paths = [write_netcdf(ds, out_dir / f"skyview_{region}.nc")]
     paths += [write_geotiff(ds[v], out_dir / f"{v}_{region}.tif") for v in GEOTIFF_VARIABLES]
     csv = out_dir / f"top_spots_{region}.csv"
-    top_spots(ds, min_totality_s=min_totality_s).to_csv(csv, index=False, float_format="%.4f")
+    spots = top_spots(ds, min_totality_s=min_totality_s)
+    spots.to_csv(csv, index=False, float_format="%.4f")
     paths.append(csv)
-    paths += write_maps(ds, out_dir)
+    paths += write_maps(ds, out_dir, spots)
     return paths

@@ -53,6 +53,7 @@ def synthetic_ds() -> xr.Dataset:
         "best_elev_m": np.full(shape, 800.0),
         "p_clear_sky": p,
         "clear_fraction": np.full(shape, 1.0),
+        "land_fraction": np.full(shape, 1.0),
         "t_max_utc": np.full(shape, np.datetime64("2026-08-12T18:29", "ms")),
         "sun_alt_apparent_deg": np.full(shape, 8.0),
         "sun_az_deg": np.full(shape, 282.0),
@@ -80,6 +81,18 @@ def test_top_spots_sorted_separated_and_in_path() -> None:
             assert d >= 5.0
     # The best cell is at the eastern edge (p rises eastwards), inside the path.
     assert table["best_lon"].iloc[0] == pytest.approx(ds["lon"].values.max(), abs=0.011)
+
+
+def test_top_spots_skip_islets() -> None:
+    ds = synthetic_ds()
+    best = top_spots(ds, n=1)
+    i = int(np.argmin(np.abs(ds["lat"].values - best["best_lat"].iloc[0])))
+    j = int(np.argmin(np.abs(ds["lon"].values - best["best_lon"].iloc[0])))
+    ds["land_fraction"][i, j] = 1.0 / 9.0  # the best cell becomes a rock with one land spot
+    assert (top_spots(ds, n=1)["best_lat"].iloc[0], top_spots(ds, n=1)["best_lon"].iloc[0]) != (
+        best["best_lat"].iloc[0],
+        best["best_lon"].iloc[0],
+    )
 
 
 def test_top_spots_respect_min_totality() -> None:
@@ -110,7 +123,8 @@ def test_write_geotiff_georeference(tmp_path: Path) -> None:
 
 
 def test_write_maps(tmp_path: Path) -> None:
-    paths = write_maps(synthetic_ds(), tmp_path)
+    ds = synthetic_ds()
+    paths = write_maps(ds, tmp_path, top_spots(ds, n=5, min_separation_km=1.0))
     assert len(paths) == 4
     for p in paths:
         assert p.exists() and p.stat().st_size > 10_000

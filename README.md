@@ -51,10 +51,12 @@ Outputs, per region in `outputs/<region>/`:
 - `p_clear_view_<region>.tif`, `p_clear_view_no_slant_<region>.tif`,
   `totality_s_<region>.tif`: GeoTIFFs (EPSG:4326) for GIS tools.
 - `map_*.png`: the headline chance of a clear view, the optimistic version
-  without the slant correction, totality duration, and the terrain map.
+  without the slant correction, totality duration, and the terrain map. The
+  top spots are marked on every map (orange triangles, ranks 1–5 numbered).
 - `top_spots_<region>.csv`: the 25 best cells inside the path with at least
-  `--min-totality` seconds of totality (default 60), at least 20 km apart, with
-  the best spot's coordinates. Inside the path the clear-sky chance rises
+  `--min-totality` seconds of totality (default 60), at least 20 km apart and at
+  least a third land (which drops offshore rocks such as Eldey), with the best
+  spot's coordinates. Inside the path the clear-sky chance rises
   toward the drier south while totality shortens, so the list sits near the
   chosen minimum: the threshold is the trade-off to explore.
 

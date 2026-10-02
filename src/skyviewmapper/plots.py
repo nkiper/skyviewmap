@@ -15,9 +15,10 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
 import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
-from numpy.typing import ArrayLike  # noqa: E402
+from numpy.typing import ArrayLike, NDArray  # noqa: E402
 from matplotlib.artist import Artist  # noqa: E402
 from matplotlib.axes import Axes  # noqa: E402
 from matplotlib.colorbar import Colorbar  # noqa: E402
@@ -35,6 +36,7 @@ BLUE_RAMP = (
 )
 SOME_ALL = ("#5598e7", "#104281")  # ramp steps 350 / 650: some / every typical spot sees the Sun
 SURFACE = "#fcfcfb"
+SPOT_ORANGE = "#eb6834"  # categorical slot 2: identity of the top spots, distinct from the blue ramp
 INK_PRIMARY = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 INK_MUTED = "#898781"
@@ -135,8 +137,46 @@ def _overlays(ax: Axes, ds: xr.Dataset, fade_outside_path: bool = True) -> None:
         if w < lo < e and s < la < n:
             ax.plot(lo, la, "o", ms=3.5, color=INK_PRIMARY, mec=SURFACE, mew=1.0, zorder=5)
             ax.annotate(name, (lo, la), xytext=(4, 3), textcoords="offset points", fontsize=8,
-                        color=INK_PRIMARY, zorder=5,
+                        color=INK_PRIMARY, zorder=8,  # above spot markers so names stay readable
                         bbox={"boxstyle": "round,pad=0.15", "fc": SURFACE, "ec": "none", "alpha": 0.75})
+
+
+def _mark_spots(ax: Axes, spots: pd.DataFrame | None, n_labelled: int = 5) -> None:
+    """Top spots as orange triangles with a 2 px surface ring; only the first ``n_labelled`` ranks get numbers."""
+    if spots is None or spots.empty:
+        return
+    ax.plot(spots["best_lon"], spots["best_lat"], "^", ms=8, color=SPOT_ORANGE, mec=SURFACE, mew=2.0,
+            ls="none", zorder=6)
+    # Place each number in whichever of 8 directions (at 20 pt) is farthest, in
+    # screen points, from every marker and every number already placed.
+    to_pt = 72.0 / ax.figure.dpi
+    markers_pt = ax.transData.transform(np.column_stack([spots["best_lon"].to_numpy(float),
+                                                         spots["best_lat"].to_numpy(float)])) * to_pt
+    angles = np.radians(np.arange(8) * 45.0)
+    dirs = np.column_stack([np.cos(angles), np.sin(angles)])
+    placed: list[NDArray[np.float64]] = []
+    top = spots.head(n_labelled)
+    for k, (rank, la, lo) in enumerate(
+        zip(top["rank"].to_numpy(), top["best_lat"].to_numpy(float), top["best_lon"].to_numpy(float))
+    ):
+        candidates = markers_pt[k] + 20.0 * dirs  # (8, 2)
+        obstacles = np.vstack([markers_pt, *placed]) if placed else markers_pt
+        clearance = np.linalg.norm(candidates[:, None, :] - obstacles[None, :, :], axis=-1).min(axis=1)
+        best = int(np.argmax(clearance))
+        placed.append(candidates[best][None, :])
+        ax.annotate(str(rank), (lo, la), xytext=tuple(20.0 * dirs[best]), textcoords="offset points",
+                    ha="center", va="center", fontsize=8, weight="bold", color=INK_PRIMARY, zorder=7,
+                    bbox={"boxstyle": "round,pad=0.2", "fc": SURFACE, "ec": "none", "alpha": 0.9},
+                    arrowprops={"arrowstyle": "-", "color": INK_SECONDARY, "lw": 0.8, "shrinkA": 0, "shrinkB": 4})
+
+
+def _spot_handles(spots: pd.DataFrame | None) -> list[Artist]:
+    if spots is None or spots.empty:
+        return []
+    min_tot = spots.attrs.get("min_totality_s")
+    cond = f", ≥{min_tot:g} s of totality" if min_tot is not None else ""
+    label = f"Top {len(spots)} spots{cond} (1–5 numbered)"
+    return [Line2D([], [], marker="^", ms=8, color=SPOT_ORANGE, mec=SURFACE, mew=2.0, ls="none", label=label)]
 
 
 def _key(fig: Figure, ax: Axes, handles: list[Artist]) -> None:
@@ -166,7 +206,9 @@ def _footer(fig: Figure, ds: xr.Dataset, extra: str = "") -> None:
     fig.text(0.01, 0.01, note, ha="left", va="bottom", fontsize=7.5, color=INK_MUTED)
 
 
-def plot_probability(ds: xr.Dataset, var: str, path: Path, title: str, subtitle: str) -> Path:
+def plot_probability(
+    ds: xr.Dataset, var: str, path: Path, title: str, subtitle: str, spots: pd.DataFrame | None = None
+) -> Path:
     fig, ax, cax = _base_map(ds, title, subtitle)
     cmap = SEQUENTIAL.with_extremes(bad=SURFACE)
     im = _image(ax, (ds[var].values), origin="lower", extent=_extent(ds), cmap=cmap,
@@ -179,12 +221,14 @@ def plot_probability(ds: xr.Dataset, var: str, path: Path, title: str, subtitle:
     ticks = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
     cb.set_ticks(ticks)
     cb.set_ticklabels([f"{round(t * 100)}%" for t in ticks])
-    _key(fig, ax, [Patch(color=BLOCKED_GREY, label="Terrain hides the Sun from every spot"), *_path_handles()])
+    _mark_spots(ax, spots)
+    _key(fig, ax, [Patch(color=BLOCKED_GREY, label="Terrain hides the Sun from every spot"), *_path_handles(),
+                   *_spot_handles(spots)])
     _footer(fig, ds)
     return _save(fig, path)
 
 
-def plot_totality(ds: xr.Dataset, path: Path) -> Path:
+def plot_totality(ds: xr.Dataset, path: Path, spots: pd.DataFrame | None = None) -> Path:
     fig, ax, cax = _base_map(ds, "Duration of totality", "Seconds of total eclipse at each place; blank outside the path")
     tot = ds["totality_s"].values.astype(float)
     cmap = SEQUENTIAL.with_extremes(bad=SURFACE)
@@ -193,12 +237,13 @@ def plot_totality(ds: xr.Dataset, path: Path) -> Path:
                    cmap=cmap, vmin=0, vmax=vmax, interpolation="nearest")
     _overlays(ax, ds, fade_outside_path=False)
     _colorbar(fig, im, cax, "Totality (seconds)")
-    _key(fig, ax, _path_handles(fade=False))
+    _mark_spots(ax, spots)
+    _key(fig, ax, [*_path_handles(fade=False), *_spot_handles(spots)])
     _footer(fig, ds)
     return _save(fig, path)
 
 
-def plot_terrain(ds: xr.Dataset, path: Path) -> Path:
+def plot_terrain(ds: xr.Dataset, path: Path, spots: pd.DataFrame | None = None) -> Path:
     fig, ax, cax = _base_map(ds, "Does the terrain hide the Sun?",
                              "Of the spots tested in each ~1 km cell (9 typical + the highest point), "
                              "how many see the Sun at maximum eclipse")
@@ -216,7 +261,8 @@ def plot_terrain(ds: xr.Dataset, path: Path) -> Path:
     _overlays(ax, ds)
     labels = ("No spot sees the Sun", "Some spots see it", "Every typical spot sees it")
     handles: list[Artist] = [Patch(color=c, label=lab) for c, lab in zip((BLOCKED_GREY, *SOME_ALL), labels)]
-    _key(fig, ax, handles + _path_handles())
+    _mark_spots(ax, spots)
+    _key(fig, ax, handles + _path_handles() + _spot_handles(spots))
     _footer(fig, ds, "Eye height 2 m; standard refraction.")
     return _save(fig, path)
 
@@ -228,7 +274,8 @@ def _save(fig: Figure, path: Path) -> Path:
     return path
 
 
-def write_maps(ds: xr.Dataset, out_dir: Path) -> list[Path]:
+def write_maps(ds: xr.Dataset, out_dir: Path, spots: pd.DataFrame | None = None) -> list[Path]:
+    """The four maps; ``spots`` (the top-spots table) is marked on each when given."""
     region = str(ds.attrs.get("region", "region"))
     label = region.capitalize()
     return [
@@ -236,12 +283,14 @@ def write_maps(ds: xr.Dataset, out_dir: Path) -> list[Path]:
             ds, "p_clear_view", out_dir / f"map_p_clear_view_{region}.png",
             f"{label}: chance of seeing the 12 Aug 2026 eclipse",
             "Cloud along the sight line (with slant-path correction) × somewhere in the ~1 km cell sees the Sun over the terrain",
+            spots,
         ),
         plot_probability(
             ds, "p_clear_view_no_slant", out_dir / f"map_p_clear_view_no_slant_{region}.png",
             f"{label}: chance of seeing the eclipse (optimistic)",
-            "As the headline map, but without the slant-path cloud correction",
+            "As the headline map, but without the slant-path cloud correction (top spots as ranked by the headline map)",
+            spots,
         ),
-        plot_totality(ds, out_dir / f"map_totality_{region}.png"),
-        plot_terrain(ds, out_dir / f"map_terrain_{region}.png"),
+        plot_totality(ds, out_dir / f"map_totality_{region}.png", spots),
+        plot_terrain(ds, out_dir / f"map_terrain_{region}.png", spots),
     ]
