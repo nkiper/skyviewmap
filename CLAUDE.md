@@ -26,5 +26,7 @@ line of sight* and terrain obstruction toward the event's azimuth.
 ## Working style
 - Propose a plan before any non-trivial change; work in small steps.
 - State physical assumptions and approximations explicitly in docstrings.
+- Keep README.md succinct and current: update its status table, setup, layout
+  and key assumptions in the same branch/PR as any change that affects them.
 - Always use the project venv (macOS): `.venv/bin/python -m pip ...` and
   `.venv/bin/python -m pytest`.
