@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "cdsapi>=0.7.7",
     "numpy>=1.26",
+    "skyfield>=1.49",
 ]
 
 [project.optional-dependencies]
@@ -19,3 +20,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "ephemeris: needs the DE440s file in data/raw/skyfield (skipped if absent)",
+]
