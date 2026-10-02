@@ -22,7 +22,7 @@ overhead. The model therefore looks up cloud cover where the ray crosses each la
 | 3b. Multiple regions (Iberia + Iceland) | ✅ done |
 | 4. ERA5 low/mid/high cloud climatology | ✅ done |
 | 5. Cloud sampled along the line of sight, layers combined | ✅ done |
-| 6. End-to-end pipeline and P(clear view) map | ⏳ next |
+| 6. End-to-end pipeline and P(clear view) map | ✅ done — v1 complete |
 
 ## Setup
 Requires Python 3.11+.
@@ -36,6 +36,29 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 .venv/bin/pyright                                    # type check (0 errors expected)
 ```
+
+## Running
+```sh
+.venv/bin/python -m skyviewmapper run                       # all regions (~1.5 min)
+.venv/bin/python -m skyviewmapper run --region iceland      # one region
+.venv/bin/python -m skyviewmapper run --no-download         # fail instead of fetching missing data
+.venv/bin/python -m skyviewmapper run --min-totality 90     # top-spots table: at least 90 s of totality
+```
+
+Outputs, per region in `outputs/<region>/`:
+- `skyview_<region>.nc`: every variable on the map grid (probabilities, terrain,
+  eclipse circumstances), with units and descriptions.
+- `p_clear_view_<region>.tif`, `p_clear_view_no_slant_<region>.tif`,
+  `totality_s_<region>.tif`: GeoTIFFs (EPSG:4326) for GIS tools.
+- `map_*.png`: the headline chance of a clear view, the optimistic version
+  without the slant correction, totality duration, and the terrain map. The
+  top spots are marked on every map (orange triangles, ranks 1–5 numbered).
+- `top_spots_<region>.csv`: the 25 best cells inside the path with at least
+  `--min-totality` seconds of totality (default 60), at least 20 km apart and at
+  least a third land (which drops offshore rocks such as Eldey), with the best
+  spot's coordinates. Inside the path the clear-sky chance rises
+  toward the drier south while totality shortens, so the list sits near the
+  chosen minimum: the threshold is the trade-off to explore.
 
 Tests marked `ephemeris` (NASA eclipse tables), `dem` (real DEM) and `era5` (real
 cloud data) are skipped until the corresponding data has been downloaded. ERA5
@@ -54,8 +77,12 @@ src/skyviewmapper/
   terrain.py     horizon toward the Sun per spot; per-cell terrain visibility
   climatology.py summary statistics of the cloud samples (layer means, overhead P(clear))
   los_cloud.py   P(cloud-free line of sight to the Sun) from the cloud samples
+  visibility.py  combines cloud and terrain into P(clear view)
+  pipeline.py    end-to-end run for one region -> xarray Dataset
+  plots.py       PNG maps
+  __main__.py    command line (python -m skyviewmapper run ...)
   io/            data loading (skyfield_data.py: JPL ephemeris; dem.py: Copernicus GLO-90;
-                 era5.py: ERA5 cloud cover from the CDS)
+                 era5.py: ERA5 cloud cover from the CDS; outputs.py: NetCDF, GeoTIFF, CSV)
 tests/           pytest, checked against hand calculations and NASA tables
 data/, outputs/  downloaded data and results (git-ignored)
 ```
@@ -94,3 +121,8 @@ data/, outputs/  downloaded data and results (git-ignored)
   Results are therefore given with and without it.
 - The cloud term is computed on a 5× coarser grid (0.05°) and interpolated to
   the map grid; ERA5 itself is 0.25°.
+- Combination: cloud and terrain are treated as independent. Headline
+  P(clear view) = P(cloud-free line of sight, slant-corrected) where at least
+  one spot in the cell sees the Sun over the terrain; cells where no spot does
+  are masked. Variants without the slant correction and for a typical spot
+  (× share of typical spots that see the Sun) are saved alongside.
