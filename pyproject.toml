@@ -14,6 +14,7 @@ dependencies = [
     "rasterio>=1.4",
     "xarray>=2024.1",
     "netCDF4>=1.6",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +36,8 @@ filterwarnings = [
     # runtime object is the backward-compatible direction. numpy silences this
     # by default, but pytest resets warning filters.
     "ignore:numpy.ndarray size changed:RuntimeWarning",
+    # Inside xarray's netCDF4 backend (third-party), deprecated in NumPy 2.5.
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:xarray.backends.netCDF4_",
 ]
 
 # Shared by Pylance (VS Code Problems panel) and the pyright CLI.

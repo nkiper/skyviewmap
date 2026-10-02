@@ -134,8 +134,19 @@ def load_dem(
         return Dem(heights=np.load(npy, mmap_mode="r"), **m)
     if download:
         download_tiles(lat_min, lat_max, lon_min, lon_max)
-    elif not any(TILE_DIR.glob("*.tif")):
-        raise FileNotFoundError(TILE_DIR)
+    else:
+        # Every tile must be either downloaded or known to be ocean (.missing);
+        # otherwise land would silently become 0 m.
+        lats, lons = _tile_ranges(lat_min, lat_max, lon_min, lon_max)
+        absent = [
+            tile_name(lat, lon)
+            for lat in lats
+            for lon in lons
+            if not (TILE_DIR / f"{tile_name(lat, lon)}.tif").exists()
+            and not (TILE_DIR / f"{tile_name(lat, lon)}.missing").exists()
+        ]
+        if absent:
+            raise FileNotFoundError(f"{len(absent)} DEM tiles not downloaded, e.g. {absent[0]}")
     dem = build_mosaic(lat_min, lat_max, lon_min, lon_max)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     np.save(npy, dem.heights)
