@@ -50,7 +50,9 @@ python3 -m venv .venv
 Create `events/<date>.toml` with `id`, `name`, `date`, `type` (`total`,
 `annular` or `hybrid`), `years` (first and last climatology year) and
 optionally `half_window_days` (default 7), `include` boxes to limit the area,
-`[display_names]` for derived regions, or explicit `[[regions]]` (see
+`exclude` boxes to drop land (e.g. an island the coarse path only grazes),
+`[display_names]` for derived regions (keyed by their stable names such as
+`36N_002W`, shown by the `regions` command), or explicit `[[regions]]` (see
 `events/2026-08-12.toml`). Without explicit regions, the path is found on a
 coarse global grid and every land area under it becomes a region of at most
 15° of longitude, each with its own map grid, DEM and ERA5 extents, time

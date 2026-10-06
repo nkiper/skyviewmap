@@ -82,7 +82,7 @@ def synthetic_cp(t0_minute: int = 8 * 60, minutes_per_deg: float = 2.0) -> Coars
 def test_region_for_tiles_settings() -> None:
     cp = synthetic_cp()
     tiles = {(35, lo) for lo in range(-5, 5)} | {(34, 0), (36, 0)}
-    r = region_for_tiles(tiles, cp, DAY, 3, {"r03_36N_000E": "Test land"})
+    r = region_for_tiles(tiles, cp, DAY, {"36N_000E": "Test land"})
     g = r.grid
     assert (g.lat_min, g.lat_max, g.lon_min, g.lon_max) == (34.0, 37.0, -5.0, 5.0)
     assert g.dlat == 0.01 and g.dlon == lon_resolution(37.0)
@@ -93,7 +93,7 @@ def test_region_for_tiles_settings() -> None:
     # Maxima run 08:39-09:01 UT over the box (+-0.5 deg): hours 8, 9, 10 bracket them.
     assert r.era5_hours == (8, 9, 10)
     assert r.window_utc[0].strftime("%H:%M") < "08:40" < "09:02" < r.window_utc[1].strftime("%H:%M")
-    assert r.name == "r03_36N_000E" and r.label == "Test land"
+    assert r.name == "36N_000E" and r.label == "Test land"
 
 
 def test_derive_regions_drops_buffer_only_land_and_orders_by_time() -> None:
@@ -102,7 +102,17 @@ def test_derive_regions_drops_buffer_only_land_and_orders_by_time() -> None:
     land = {(35, lo) for lo in range(5, 9)} | {(35, lo) for lo in range(-15, -11)} | {(37, 0)}  # (37, 0): 1 deg off the path
     regions = derive_regions(ev, cp, land)
     assert [r.grid.lon_min for r in regions] == [-15.0, 5.0]  # west first: earlier maxima
-    assert [r.name[:3] for r in regions] == ["r01", "r02"]
+    assert [r.name for r in regions] == ["36N_013W", "36N_007E"]
+
+
+def test_exclude_boxes_drop_land() -> None:
+    cp = synthetic_cp()
+    land = {(35, lo) for lo in range(5, 9)} | {(35, lo) for lo in range(-15, -11)}
+    base = Event(id="t", name="t", date=DAY, type="total", years=(1997, 2026))
+    keep_east = Event(id="t", name="t", date=DAY, type="total", years=(1997, 2026), exclude=((34.0, 37.0, -16.0, -10.0),))
+    assert len(derive_regions(base, cp, land)) == 2
+    regions = derive_regions(keep_east, cp, land)
+    assert [r.name for r in regions] == ["36N_007E"]  # names stay stable when a region is dropped
 
 
 def test_unknown_display_name_raises() -> None:

@@ -16,7 +16,7 @@ from .regions import Region
 
 EVENTS_DIR = Path(__file__).resolve().parents[2] / "events"
 EVENT_TYPES = ("total", "annular", "hybrid")
-_TOP_KEYS = {"id", "name", "date", "type", "years", "half_window_days", "include", "regions", "display_names"}
+_TOP_KEYS = {"id", "name", "date", "type", "years", "half_window_days", "include", "exclude", "regions", "display_names"}
 _REGION_KEYS = {
     "name", "display_name", "grid", "res", "res_lon", "dem_box", "era5_box", "window_utc", "era5_hours", "cloud_coarsen",
 }
@@ -28,8 +28,8 @@ class Event:
 
     ``years`` are the first and last climatology years (inclusive);
     ``include`` optionally limits derived regions to these
-    (lat_min, lat_max, lon_min, lon_max) boxes; ``display_names`` renames
-    derived regions.
+    (lat_min, lat_max, lon_min, lon_max) boxes and ``exclude`` drops land
+    tiles touching these boxes; ``display_names`` renames derived regions.
     """
 
     id: str
@@ -39,6 +39,7 @@ class Event:
     years: tuple[int, int]
     half_window_days: int = 7
     include: tuple[tuple[float, float, float, float], ...] = ()
+    exclude: tuple[tuple[float, float, float, float], ...] = ()
     explicit_regions: tuple[Region, ...] = ()
     display_names: dict[str, str] = field(default_factory=dict)
 
@@ -115,6 +116,7 @@ def parse_event(cfg: dict[str, Any]) -> Event:
         years=(int(years[0]), int(years[1])),
         half_window_days=int(cfg.get("half_window_days", 7)),
         include=tuple(_box(b, "include box") for b in cfg.get("include", [])),
+        exclude=tuple(_box(b, "exclude box") for b in cfg.get("exclude", [])),
         explicit_regions=tuple(_region(r, day) for r in cfg.get("regions", [])),
         display_names={str(k): str(v) for k, v in cfg.get("display_names", {}).items()},
     )

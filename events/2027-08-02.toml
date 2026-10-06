@@ -7,13 +7,16 @@ type = "total"
 years = [1997, 2026]
 half_window_days = 7
 
+# Porto Santo (Madeira): its tile touches the coarse path, but no land on the
+# island is under totality at full resolution.
+exclude = [[33.0, 34.0, -17.0, -16.0]]
+
 # Readable names for the derived regions (keys are the automatic names shown
 # by `python -m skyviewmapper regions --event 2027-08-02`).
 [display_names]
-r01_34N_016W = "Porto Santo (Madeira)"
-r02_36N_002W = "Southern Spain, Morocco & western Algeria"
-r03_34N_014E = "Eastern Algeria, Tunisia & Libya"
-r04_27N_028E = "Eastern Libya & Egypt"
-r05_20N_043E = "Sudan coast, Saudi Arabia & Yemen"
-r06_10N_050E = "Somalia"
-r07_6S_072E = "Chagos atolls (Diego Garcia)"
+36N_002W = "Southern Spain, Morocco & western Algeria"
+34N_014E = "Eastern Algeria, Tunisia & Libya"
+27N_028E = "Eastern Libya & Egypt"
+20N_043E = "Sudan coast, Saudi Arabia & Yemen"
+10N_050E = "Somalia"
+6S_072E = "Chagos atolls (Diego Garcia)"

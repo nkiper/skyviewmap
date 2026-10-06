@@ -183,8 +183,14 @@ def _expand(box: tuple[float, float, float, float], margin_km: float, step: floa
     )
 
 
-def _name(lat: float, lon: float, i: int) -> str:
-    return f"r{i:02d}_{abs(lat):.0f}{'N' if lat >= 0 else 'S'}_{abs(lon):03.0f}{'E' if lon >= 0 else 'W'}"
+def _name(lat: float, lon: float) -> str:
+    """Stable region name from its centre, e.g. ``36N_002W`` (does not depend on other regions)."""
+    return f"{abs(lat):.0f}{'N' if lat >= 0 else 'S'}_{abs(lon):03.0f}{'E' if lon >= 0 else 'W'}"
+
+
+def _touches(tile: tuple[int, int], boxes: tuple[tuple[float, float, float, float], ...]) -> bool:
+    la, lo = tile
+    return any(la < b[1] and la + 1 > b[0] and lo < b[3] and lo + 1 > b[2] for b in boxes)
 
 
 # --- regions -----------------------------------------------------------------
@@ -200,19 +206,18 @@ def path_tiles(
     land: set[tuple[int, int]],
     include: tuple[tuple[float, float, float, float], ...] = (),
     buffer_cells: int = 1,
+    exclude: tuple[tuple[float, float, float, float], ...] = (),
 ) -> set[tuple[int, int]]:
-    """Land tiles within ``buffer_cells`` coarse cells of the path (and inside ``include`` boxes, if any)."""
+    """Land tiles within ``buffer_cells`` coarse cells of the path, inside ``include`` boxes (if any), not touching ``exclude`` boxes."""
     tiles = _tiles_of(dilate(cp.path, buffer_cells) if buffer_cells else cp.path, cp) & land
     if include:
-        tiles = {
-            (la, lo)
-            for la, lo in tiles
-            if any(la < b[1] and la + 1 > b[0] and lo < b[3] and lo + 1 > b[2] for b in include)
-        }
+        tiles = {t for t in tiles if _touches(t, include)}
+    if exclude:
+        tiles = {t for t in tiles if not _touches(t, exclude)}
     return tiles
 
 
-def region_for_tiles(tiles: set[tuple[int, int]], cp: CoarsePath, day: date, index: int, display_names: dict[str, str] | None = None) -> Region:
+def region_for_tiles(tiles: set[tuple[int, int]], cp: CoarsePath, day: date, display_names: dict[str, str] | None = None) -> Region:
     """Map grid, DEM/ERA5 boxes, time window and ERA5 hours for one tile group."""
     lat_min = float(min(la for la, _ in tiles))
     lat_max = float(max(la for la, _ in tiles) + 1)
@@ -252,7 +257,7 @@ def region_for_tiles(tiles: set[tuple[int, int]], cp: CoarsePath, day: date, ind
 
     lat_mid = (lat_min + lat_max) / 2
     grid = Grid(lat_min, lat_max, lon_min, lon_max, 0.01, lon_resolution(max(abs(lat_min), abs(lat_max))))
-    name = _name(lat_mid, (lon_min + lon_max) / 2, index)
+    name = _name(lat_mid, (lon_min + lon_max) / 2)
     return Region(
         name=name,
         grid=grid,
@@ -268,16 +273,19 @@ def derive_regions(
     event: Event, cp: CoarsePath, land: set[tuple[int, int]], max_lon_span: int = 15
 ) -> list[Region]:
     """Regions covering the land under the central path, ordered by time of maximum."""
-    core = path_tiles(cp, land, event.include, buffer_cells=0)  # land tiles under the path itself
+    core = path_tiles(cp, land, event.include, buffer_cells=0, exclude=event.exclude)  # land under the path itself
     groups = [
         g
-        for comp in components(path_tiles(cp, land, event.include))
+        for comp in components(path_tiles(cp, land, event.include, exclude=event.exclude))
         for g in split_group(comp, max_lon_span)
         if g & core  # drop groups reached only through the buffer
     ]
-    provisional = [region_for_tiles(g, cp, event.date, 0) for g in groups]
-    order = sorted(range(len(groups)), key=lambda i: provisional[i].window_utc[0])
-    regions = [region_for_tiles(groups[i], cp, event.date, k + 1, event.display_names) for k, i in enumerate(order)]
+    regions = sorted(
+        (region_for_tiles(g, cp, event.date, event.display_names) for g in groups), key=lambda r: r.window_utc[0]
+    )
+    names = [r.name for r in regions]
+    if len(set(names)) != len(names):
+        raise ValueError(f"derived region names collide: {names}; split differently or use explicit regions")
     unknown = set(event.display_names) - {r.name for r in regions}
     if unknown:
         raise ValueError(

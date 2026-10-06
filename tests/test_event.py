@@ -52,6 +52,7 @@ def test_central_word() -> None:
         ({"colour": "blue"}, "unknown event keys"),
         ({"regions": [{"name": "a"}]}, "region is missing"),
         ({"include": [[40, 30, 0, 1]]}, "lat_min < lat_max"),
+        ({"exclude": [[1, 2, 3]]}, "exclude box must be"),
     ],
 )
 def test_parse_errors(change: dict[str, object], message: str) -> None:
