@@ -1,0 +1,8 @@
+# Total solar eclipse of 2 August 2027. Regions are derived automatically from
+# the path over land (python -m skyviewmapper regions --event 2027-08-02).
+id = "2027-08-02"
+name = "Total solar eclipse of 2 August 2027"
+date = 2027-08-02
+type = "total"
+years = [1997, 2026]
+half_window_days = 7

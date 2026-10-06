@@ -12,7 +12,7 @@ from rasterio.transform import from_origin
 from ..constants import R_EARTH_M
 
 OUTPUT_DIR = Path(__file__).resolve().parents[3] / "outputs"
-GEOTIFF_VARIABLES = ("p_clear_view", "p_clear_view_no_slant", "totality_s")
+GEOTIFF_VARIABLES = ("p_clear_view", "p_clear_view_no_slant", "central_s")
 TOP_SPOT_COLUMNS = (
     "best_lat",
     "best_lon",
@@ -25,7 +25,7 @@ TOP_SPOT_COLUMNS = (
     "t_max_utc",
     "sun_alt_apparent_deg",
     "sun_az_deg",
-    "totality_s",
+    "central_s",
 )
 
 
@@ -82,14 +82,14 @@ def top_spots(
     ds: xr.Dataset,
     n: int = 25,
     min_separation_km: float = 20.0,
-    min_totality_s: float = 60.0,
+    min_central_s: float = 60.0,
     min_land_fraction: float = 1.0 / 3.0,
 ) -> pd.DataFrame:
-    """Best cells by ``p_clear_view`` with at least ``min_totality_s`` of totality, kept ``min_separation_km`` apart.
+    """Best cells by ``p_clear_view`` with at least ``min_central_s`` of totality/annularity, ``min_separation_km`` apart.
 
-    The totality threshold keeps the list away from the edges of the path,
-    where totality lasts only seconds and the exact limit is uncertain (lunar
-    limb profile, Delta T). ``min_land_fraction`` (share of the cell's typical
+    The duration threshold keeps the list away from the edges of the path,
+    where the central phase lasts only seconds and the exact limit is
+    uncertain (lunar limb profile, Delta T). ``min_land_fraction`` (share of the cell's typical
     spots on land) drops offshore rocks and islets, such as Eldey off
     Reykjanes, that qualify only through a single land pixel.
     """
@@ -97,7 +97,7 @@ def top_spots(
     ok = (
         np.isfinite(p)
         & ds["in_totality"].values.astype(bool)
-        & (ds["totality_s"].values >= min_totality_s)
+        & (ds["central_s"].values >= min_central_s)
         & (ds["land_fraction"].values >= min_land_fraction - 1e-9)
     )
     flat = np.flatnonzero(ok)
@@ -113,20 +113,20 @@ def top_spots(
         chosen.append(int(i))
     table = pd.DataFrame({c: ds[c].values.ravel()[chosen] for c in TOP_SPOT_COLUMNS})
     table.insert(0, "rank", np.arange(1, len(chosen) + 1))
-    table.attrs["min_totality_s"] = min_totality_s
+    table.attrs["min_central_s"] = min_central_s
     return table
 
 
-def write_outputs(ds: xr.Dataset, out_dir: Path | None = None, min_totality_s: float = 60.0) -> list[Path]:
-    """Write NetCDF, GeoTIFFs, PNG maps and the top-spots CSV for one region."""
+def write_outputs(ds: xr.Dataset, out_dir: Path | None = None, min_central_s: float = 60.0) -> list[Path]:
+    """Write NetCDF, GeoTIFFs, PNG maps and the top-spots CSV for one region, in <out_dir>/<event>/<region>/."""
     from ..plots import write_maps  # matplotlib only needed here
 
     region = str(ds.attrs["region"])
-    out_dir = (out_dir or OUTPUT_DIR) / region
+    out_dir = (out_dir or OUTPUT_DIR) / str(ds.attrs["event"]) / region
     paths = [write_netcdf(ds, out_dir / f"skyview_{region}.nc")]
     paths += [write_geotiff(ds[v], out_dir / f"{v}_{region}.tif") for v in GEOTIFF_VARIABLES]
     csv = out_dir / f"top_spots_{region}.csv"
-    spots = top_spots(ds, min_totality_s=min_totality_s)
+    spots = top_spots(ds, min_central_s=min_central_s)
     spots.to_csv(csv, index=False, float_format="%.4f")
     paths.append(csv)
     paths += write_maps(ds, out_dir, spots)

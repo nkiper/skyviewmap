@@ -14,8 +14,9 @@ Assumptions and approximations
 - Crossing points use :func:`geometry.los_layer_crossing` with the Sun's
   apparent (refracted) altitude and the effective Earth radius
   ``R / (1 - k)``, k = 0.13: the same refraction treatment as the terrain.
-- ERA5 fields at the two full hours either side are interpolated linearly
-  in time to each observer's maximum eclipse (clamped to that hour range).
+- ERA5 fields at the two full hours either side of each observer's maximum
+  eclipse are interpolated linearly in time (clamped to the hour range
+  supplied).
 - Slant-path correction: clouds in a layer are modelled as randomly placed
   cylinders with height/width ratio ``beta`` (a Boolean model). A sight line
   at elevation ``theta`` also meets cloud sides, so its chance of passing a
@@ -95,6 +96,20 @@ def time_weight(t_utc: NDArray[np.datetime64], hour0: np.datetime64, hour1: np.d
     return np.clip((t_utc - hour0) / np.timedelta64(1, "ms") / span, 0.0, 1.0)
 
 
+def bracketing_hours(
+    t_utc: NDArray[np.datetime64], hours: list[int]
+) -> tuple[NDArray[np.float64], NDArray[np.intp]]:
+    """For each time: weight of the later bracketing hour and index of the earlier one in ``hours``.
+
+    Times before the first hour or after the last are clamped to the ends.
+    """
+    ms = np.asarray(t_utc).astype("datetime64[ms]").astype(np.int64)
+    hour_of_day = (ms % 86_400_000) / 3_600_000.0  # UTC hour of day (epoch days start at midnight UTC)
+    pos = np.clip(hour_of_day - hours[0], 0.0, len(hours) - 1.0)
+    i = np.minimum(np.floor(pos).astype(np.intp), len(hours) - 2)
+    return pos - i, i
+
+
 # --- main --------------------------------------------------------------------
 
 
@@ -115,7 +130,7 @@ def los_cloud(
     """Cloud-free line-of-sight probability for observers (inputs broadcast to one shape).
 
     ``samples`` is the ERA5 cube (year, day, hour, latitude, longitude) with
-    exactly two consecutive hours.
+    two or more consecutive hours, all on the day of ``t_max_utc``.
     """
     floats = [np.asarray(x, dtype=float) for x in (lat_deg, lon_deg, ground_h, sun_alt_apparent_deg, sun_az_deg)]
     t_arr = np.asarray(t_max_utc)
@@ -124,17 +139,16 @@ def los_cloud(
     lat, lon, h, alt, az = (np.broadcast_to(a, shape).ravel() for a in floats)
 
     hours = [int(x) for x in samples["hour"].values]
-    if len(hours) != 2 or hours[1] != hours[0] + 1:
-        raise ValueError(f"need two consecutive ERA5 hours, got {hours}")
-    day0 = np.datetime64(t[0], "D") if t.size else np.datetime64("2026-08-12", "D")
-    w_t = time_weight(t, day0 + np.timedelta64(hours[0], "h"), day0 + np.timedelta64(hours[1], "h"))
+    if len(hours) < 2 or any(b != a + 1 for a, b in zip(hours, hours[1:])):
+        raise ValueError(f"need two or more consecutive ERA5 hours, got {hours}")
+    hour_lo, hour_i = bracketing_hours(t, hours)
 
     grid_lat = samples["latitude"].values.astype(float)
     grid_lon = samples["longitude"].values.astype(float)
     # (sample, hour, flat lat/lon) per layer, float32 to keep chunks small.
     fields = {
         name: samples[name].transpose("year", "day", "hour", "latitude", "longitude").values.reshape(
-            -1, 2, grid_lat.size * grid_lon.size
+            -1, len(hours), grid_lat.size * grid_lon.size
         )
         for name in layer_heights_m
     }
@@ -158,9 +172,11 @@ def los_cloud(
             )
             crossing_km[name][sl] = c.ground_distance_m[:, len(heights) // 2] / 1_000.0
             idx, w = bilinear_weights(c.lat, c.lon, grid_lat, grid_lon)  # (P, H, 4)
-            f = fields[name][:, :, idx]  # (S, 2, P, H, 4)
-            wt = w_t[sl][None, :, None, None]
-            f_t = (1.0 - wt) * f[:, 0] + wt * f[:, 1]  # (S, P, H, 4)
+            hi = hour_i[sl][:, None, None]  # earlier bracketing hour, per observer
+            f0 = fields[name][:, hi, idx]  # (S, P, H, 4)
+            f1 = fields[name][:, hi + 1, idx]
+            wt = hour_lo[sl][None, :, None, None]
+            f_t = (1.0 - wt) * f0 + wt * f1  # (S, P, H, 4)
             n = (f_t * w[None]).sum(axis=-1).mean(axis=-1)  # (S, P)
             layer_cloud[name][sl] = n.mean(axis=0)
             prod_plain = prod_plain * (1.0 - n)

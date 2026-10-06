@@ -9,7 +9,8 @@ from numpy.typing import NDArray
 from .ephemeris import body_track, local_circumstances
 from .grid import resample_bilinear
 from .io.dem import load_dem
-from .io.era5 import DEFAULT_HALF_WINDOW_DAYS, DEFAULT_YEARS, load_cloud_samples
+from .event import Event
+from .io.era5 import load_cloud_samples
 from .io.skyfield_data import load_ephemeris
 from .los_cloud import los_cloud
 from .regions import Region
@@ -25,7 +26,7 @@ VARIABLES: dict[str, tuple[str, str]] = {
     "p_clear_sky": ("1", "P(cloud-free line of sight to the Sun), slant-corrected"),
     "p_clear_sky_no_slant": ("1", "P(cloud-free line of sight to the Sun), random overlap only"),
     "terrain_blocked": ("1", "1 where no spot in the cell sees the Sun over the terrain"),
-    "in_totality": ("1", "1 inside the path of totality"),
+    "in_totality": ("1", "1 inside the central path (totality or annularity)"),
     "clear_fraction": ("1", "share of the cell's 3x3 typical spots that see the Sun over the terrain"),
     "land_fraction": ("1", "share of the cell's 3x3 typical spots that are on land"),
     "best_margin_deg": ("degree", "best spot: Sun apparent altitude minus terrain horizon (positive = clear)"),
@@ -40,22 +41,19 @@ VARIABLES: dict[str, tuple[str, str]] = {
     "sun_az_deg": ("degree", "Sun azimuth at maximum, clockwise from north"),
     "magnitude": ("1", "eclipse magnitude (fraction of the Sun's diameter covered)"),
     "obscuration": ("1", "fraction of the Sun's area covered"),
-    "totality_s": ("s", "duration of totality (0 outside the path)"),
+    "totality_s": ("s", "duration of totality (0 outside the path of totality)"),
+    "central_s": ("s", "duration of the central phase, total or annular (0 outside the central path)"),
+    "eclipse_type": ("1", "0 none, 1 partial, 2 annular, 3 total"),
 }
 
 
-def run_region(
-    region: Region,
-    download: bool = True,
-    years: tuple[int, ...] = DEFAULT_YEARS,
-    half_window: int = DEFAULT_HALF_WINDOW_DAYS,
-) -> xr.Dataset:
-    """Compute every map variable for ``region`` on its map grid."""
+def run_region(event: Event, region: Region, download: bool = True) -> xr.Dataset:
+    """Compute every map variable for one region of an event on its map grid."""
     eph, ts = load_ephemeris(download=download)
     track = body_track(eph, ts, *region.window_utc)
     dem = load_dem(*region.dem_box, download=download)
     pyramid = build_pyramid(dem)
-    samples = load_cloud_samples(region, years, half_window, download=download)
+    samples = load_cloud_samples(event, region, download=download)
 
     # Eclipse and terrain on the map grid.
     grid = region.grid
@@ -73,7 +71,7 @@ def run_region(
     p_sky = np.clip(resample_bilinear(cloud.p_clear_sky, cgrid, grid), 0.0, 1.0)
     p_sky0 = np.clip(resample_bilinear(cloud.p_clear_sky_no_slant, cgrid, grid), 0.0, 1.0)
 
-    vis = combine_visibility(p_sky, p_sky0, ter.best_margin_deg, ter.clear_fraction, ecl.totality_s)
+    vis = combine_visibility(p_sky, p_sky0, ter.best_margin_deg, ter.clear_fraction, ecl.central_s)
 
     data: dict[str, NDArray[np.generic]] = {
         **vis,
@@ -94,6 +92,8 @@ def run_region(
         "magnitude": ecl.magnitude,
         "obscuration": ecl.obscuration,
         "totality_s": ecl.totality_s,
+        "central_s": ecl.central_s,
+        "eclipse_type": ecl.eclipse_type,
     }
     ds = xr.Dataset(
         {
@@ -106,11 +106,16 @@ def run_region(
             "lon": ("lon", grid.lons, {"units": "degree_east"}),
         },
         attrs={
-            "title": f"Visibility of the 12 Aug 2026 total solar eclipse: {region.name}",
+            "title": f"{event.name}: {region.label}",
+            "event": event.id,
+            "event_name": event.name,
+            "event_type": event.type,
+            "central_word": event.central_word,
             "region": region.name,
+            "region_label": region.label,
             "grid_res_deg": f"{grid.dlat} x {grid.dlon}",
-            "cloud_data": f"ERA5 low/medium/high cloud cover, {years[0]}-{years[-1]}, Aug {12 - half_window}-{12 + half_window}, "
-            f"{'/'.join(f'{h:02d}' for h in region.era5_hours)} UT",
+            "cloud_data": f"ERA5 low/medium/high cloud cover, {event.years[0]}-{event.years[1]}, "
+            f"event date ±{event.half_window_days} days, {'/'.join(f'{h:02d}' for h in region.era5_hours)} UT",
             "terrain_data": "Copernicus GLO-90 DEM",
             "assumptions": "see README.md: refraction k=0.13; random cloud overlap per sample; "
             "slant-path cloud correction (uncertain); cloud and terrain independent",

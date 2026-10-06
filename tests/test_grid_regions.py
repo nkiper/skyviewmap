@@ -5,7 +5,8 @@ import pytest
 
 from skyviewmapper.grid import Grid
 from skyviewmapper.io.dem import build_mosaic, lon_width_factor, tile_cols
-from skyviewmapper.regions import REGIONS
+
+from conftest import event_2026
 
 
 def test_grid_square_cells() -> None:
@@ -45,9 +46,9 @@ def test_mosaic_refuses_mixed_bands() -> None:
         build_mosaic(49.0, 51.0, 0.0, 1.0)
 
 
-@pytest.mark.parametrize("name", list(REGIONS))
+@pytest.mark.parametrize("name", ["iberia", "iceland"])
 def test_regions_are_consistent(name: str) -> None:
-    r = REGIONS[name]
+    r = next(x for x in event_2026().explicit_regions if x.name == name)
     lat_min, lat_max, lon_min, lon_max = r.dem_box
     g = r.grid
     # DEM covers the grid with a margin, within a single Copernicus band.

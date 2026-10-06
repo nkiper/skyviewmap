@@ -44,18 +44,28 @@ BLOCKED_GREY = "#c3c2b7"
 
 SEQUENTIAL = LinearSegmentedColormap.from_list("blue_ramp", BLUE_RAMP)
 
-REFERENCE_TOWNS: dict[str, list[tuple[str, float, float]]] = {
-    "iberia": [
-        ("A Coruña", 43.36, -8.41), ("Oviedo", 43.36, -5.85), ("Bilbao", 43.26, -2.93),
-        ("León", 42.60, -5.57), ("Burgos", 42.34, -3.70), ("Zaragoza", 41.65, -0.89),
-        ("Madrid", 40.42, -3.70), ("Valencia", 39.47, -0.38), ("Palma", 39.57, 2.65),
-        ("Barcelona", 41.39, 2.17), ("Seville", 37.39, -5.98), ("Lisbon", 38.72, -9.14),
-    ],
-    "iceland": [
-        ("Reykjavík", 64.15, -21.94), ("Ólafsvík", 64.89, -23.71), ("Ísafjörður", 66.07, -23.13),
-        ("Akureyri", 65.68, -18.09), ("Vík", 63.42, -19.01), ("Egilsstaðir", 65.27, -14.39),
-    ],
-}
+# Reference towns for orientation, drawn when inside a map's extent.
+REFERENCE_TOWNS: tuple[tuple[str, float, float], ...] = (
+    # Iberia
+    ("A Coruña", 43.36, -8.41), ("Oviedo", 43.36, -5.85), ("Bilbao", 43.26, -2.93),
+    ("León", 42.60, -5.57), ("Burgos", 42.34, -3.70), ("Zaragoza", 41.65, -0.89),
+    ("Madrid", 40.42, -3.70), ("Valencia", 39.47, -0.38), ("Palma", 39.57, 2.65),
+    ("Barcelona", 41.39, 2.17), ("Seville", 37.39, -5.98), ("Lisbon", 38.72, -9.14),
+    ("Cádiz", 36.53, -6.29), ("Málaga", 36.72, -4.42), ("Granada", 37.18, -3.60), ("Almería", 36.84, -2.46),
+    # Iceland
+    ("Reykjavík", 64.15, -21.94), ("Ólafsvík", 64.89, -23.71), ("Ísafjörður", 66.07, -23.13),
+    ("Akureyri", 65.68, -18.09), ("Vík", 63.42, -19.01), ("Egilsstaðir", 65.27, -14.39),
+    # North Africa
+    ("Tangier", 35.77, -5.80), ("Tétouan", 35.57, -5.37), ("Fez", 34.03, -5.00), ("Rabat", 34.02, -6.84),
+    ("Oran", 35.70, -0.63), ("Algiers", 36.75, 3.06), ("Constantine", 36.37, 6.61), ("Tunis", 36.81, 10.18),
+    ("Sfax", 34.74, 10.76), ("Tripoli", 32.89, 13.19), ("Benghazi", 32.12, 20.07), ("Tobruk", 32.08, 23.96),
+    ("Cairo", 30.04, 31.24), ("Asyut", 27.18, 31.19), ("Luxor", 25.69, 32.64), ("Aswan", 24.09, 32.90),
+    ("Hurghada", 27.26, 33.81), ("Port Sudan", 19.62, 37.22),
+    # Arabia and the Horn of Africa
+    ("Jeddah", 21.49, 39.19), ("Mecca", 21.42, 39.83), ("Medina", 24.47, 39.61), ("Abha", 18.22, 42.51),
+    ("Sanaa", 15.37, 44.19), ("Aden", 12.79, 45.02), ("Mukalla", 14.54, 49.13), ("Bosaso", 11.28, 49.18),
+    ("Diego Garcia", -7.31, 72.41),
+)
 
 plt.rcParams.update(
     {
@@ -133,7 +143,7 @@ def _overlays(ax: Axes, ds: xr.Dataset, fade_outside_path: bool = True) -> None:
     ax.contour(lon, lat, land.astype(float), levels=[0.5], colors=INK_MUTED, linewidths=0.6)
     ax.contour(lon, lat, path.astype(float), levels=[0.5], colors=INK_PRIMARY, linewidths=1.3, linestyles="--")
     w, e, s, n = _extent(ds)
-    for name, la, lo in REFERENCE_TOWNS.get(str(ds.attrs.get("region", "")), []):
+    for name, la, lo in REFERENCE_TOWNS:
         if w < lo < e and s < la < n:
             ax.plot(lo, la, "o", ms=3.5, color=INK_PRIMARY, mec=SURFACE, mew=1.0, zorder=5)
             ax.annotate(name, (lo, la), xytext=(4, 3), textcoords="offset points", fontsize=8,
@@ -173,8 +183,9 @@ def _mark_spots(ax: Axes, spots: pd.DataFrame | None, n_labelled: int = 5) -> No
 def _spot_handles(spots: pd.DataFrame | None) -> list[Artist]:
     if spots is None or spots.empty:
         return []
-    min_tot = spots.attrs.get("min_totality_s")
-    cond = f", ≥{min_tot:g} s of totality" if min_tot is not None else ""
+    min_c = spots.attrs.get("min_central_s")
+    word = str(spots.attrs.get("central_word", "totality"))
+    cond = f", ≥{min_c:g} s of {word}" if min_c is not None else ""
     label = f"Top {len(spots)} spots{cond} (1–5 numbered)"
     return [Line2D([], [], marker="^", ms=8, color=SPOT_ORANGE, mec=SURFACE, mew=2.0, ls="none", label=label)]
 
@@ -186,8 +197,9 @@ def _key(fig: Figure, ax: Axes, handles: list[Artist]) -> None:
                fontsize=8, frameon=False, borderaxespad=2.2)
 
 
-def _path_handles(fade: bool = True) -> list[Artist]:
-    handles: list[Artist] = [Line2D([], [], color=INK_PRIMARY, lw=1.3, ls="--", label="Edge of the path of totality")]
+def _path_handles(ds: xr.Dataset, fade: bool = True) -> list[Artist]:
+    word = str(ds.attrs.get("central_word", "totality"))
+    handles: list[Artist] = [Line2D([], [], color=INK_PRIMARY, lw=1.3, ls="--", label=f"Edge of the path of {word}")]
     if fade:
         handles.append(Patch(facecolor=BLUE_RAMP[4], alpha=0.4, label="Faded: outside the path"))
     return handles
@@ -222,29 +234,31 @@ def plot_probability(
     cb.set_ticks(ticks)
     cb.set_ticklabels([f"{round(t * 100)}%" for t in ticks])
     _mark_spots(ax, spots)
-    _key(fig, ax, [Patch(color=BLOCKED_GREY, label="Terrain hides the Sun from every spot"), *_path_handles(),
+    _key(fig, ax, [Patch(color=BLOCKED_GREY, label="Terrain hides the Sun from every spot"), *_path_handles(ds),
                    *_spot_handles(spots)])
     _footer(fig, ds)
     return _save(fig, path)
 
 
-def plot_totality(ds: xr.Dataset, path: Path, spots: pd.DataFrame | None = None) -> Path:
-    fig, ax, cax = _base_map(ds, "Duration of totality", "Seconds of total eclipse at each place; blank outside the path")
-    tot = ds["totality_s"].values.astype(float)
+def plot_central(ds: xr.Dataset, path: Path, spots: pd.DataFrame | None = None) -> Path:
+    word = str(ds.attrs.get("central_word", "totality"))
+    fig, ax, cax = _base_map(ds, f"{_region_title(ds)}: duration of {word}",
+                             f"Seconds of {word} at each place; blank outside the path")
+    tot = ds["central_s"].values.astype(float)
     cmap = SEQUENTIAL.with_extremes(bad=SURFACE)
     vmax = float(np.nanmax(tot)) if np.nanmax(tot) > 0 else 1.0
     im = _image(ax, (np.where(tot > 0, tot, np.nan)), origin="lower", extent=_extent(ds),
                    cmap=cmap, vmin=0, vmax=vmax, interpolation="nearest")
     _overlays(ax, ds, fade_outside_path=False)
-    _colorbar(fig, im, cax, "Totality (seconds)")
+    _colorbar(fig, im, cax, f"{word.capitalize()} (seconds)")
     _mark_spots(ax, spots)
-    _key(fig, ax, [*_path_handles(fade=False), *_spot_handles(spots)])
+    _key(fig, ax, [*_path_handles(ds, fade=False), *_spot_handles(spots)])
     _footer(fig, ds)
     return _save(fig, path)
 
 
 def plot_terrain(ds: xr.Dataset, path: Path, spots: pd.DataFrame | None = None) -> Path:
-    fig, ax, cax = _base_map(ds, "Does the terrain hide the Sun?",
+    fig, ax, cax = _base_map(ds, f"{_region_title(ds)}: does the terrain hide the Sun?",
                              "Of the spots tested in each ~1 km cell (9 typical + the highest point), "
                              "how many see the Sun at maximum eclipse")
     cax.set_visible(False)
@@ -262,7 +276,7 @@ def plot_terrain(ds: xr.Dataset, path: Path, spots: pd.DataFrame | None = None) 
     labels = ("No spot sees the Sun", "Some spots see it", "Every typical spot sees it")
     handles: list[Artist] = [Patch(color=c, label=lab) for c, lab in zip((BLOCKED_GREY, *SOME_ALL), labels)]
     _mark_spots(ax, spots)
-    _key(fig, ax, handles + _path_handles() + _spot_handles(spots))
+    _key(fig, ax, handles + _path_handles(ds) + _spot_handles(spots))
     _footer(fig, ds, "Eye height 2 m; standard refraction.")
     return _save(fig, path)
 
@@ -274,14 +288,22 @@ def _save(fig: Figure, path: Path) -> Path:
     return path
 
 
+def _region_title(ds: xr.Dataset) -> str:
+    label = str(ds.attrs.get("region_label", ds.attrs.get("region", "")))
+    return label[:1].upper() + label[1:]
+
+
 def write_maps(ds: xr.Dataset, out_dir: Path, spots: pd.DataFrame | None = None) -> list[Path]:
     """The four maps; ``spots`` (the top-spots table) is marked on each when given."""
     region = str(ds.attrs.get("region", "region"))
-    label = region.capitalize()
+    label = _region_title(ds)
+    event = str(ds.attrs.get("event_name", "the eclipse"))
+    if spots is not None:
+        spots.attrs.setdefault("central_word", ds.attrs.get("central_word", "totality"))
     return [
         plot_probability(
             ds, "p_clear_view", out_dir / f"map_p_clear_view_{region}.png",
-            f"{label}: chance of seeing the 12 Aug 2026 eclipse",
+            f"{label}: chance of a clear view — {event}",
             "Cloud along the sight line (with slant-path correction) × somewhere in the ~1 km cell sees the Sun over the terrain",
             spots,
         ),
@@ -291,6 +313,6 @@ def write_maps(ds: xr.Dataset, out_dir: Path, spots: pd.DataFrame | None = None)
             "As the headline map, but without the slant-path cloud correction (top spots as ranked by the headline map)",
             spots,
         ),
-        plot_totality(ds, out_dir / f"map_totality_{region}.png", spots),
+        plot_central(ds, out_dir / f"map_central_{region}.png", spots),
         plot_terrain(ds, out_dir / f"map_terrain_{region}.png", spots),
     ]

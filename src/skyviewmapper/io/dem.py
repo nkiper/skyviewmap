@@ -154,9 +154,27 @@ def load_dem(
     return dem
 
 
-if __name__ == "__main__":
-    from ..regions import REGIONS
+def parse_tile_name(name: str) -> tuple[int, int]:
+    """(lat_south, lon_west) of a GLO tile name such as ``Copernicus_DSM_COG_30_N40_00_W004_00_DEM``."""
+    parts = name.split("_")
+    ns, ew = parts[4], parts[6]
+    lat = int(ns[1:]) * (1 if ns[0] == "N" else -1)
+    lon = int(ew[1:]) * (1 if ew[0] == "E" else -1)
+    return lat, lon
 
-    for region in REGIONS.values():
-        tiles = download_tiles(*region.dem_box)
-        print(f"{region.name}: {len(tiles)} GLO-90 tiles in {TILE_DIR}")
+
+def land_tiles(download: bool = True) -> set[tuple[int, int]]:
+    """(lat_south, lon_west) of every 1 deg tile that contains land, from the bucket's tile list.
+
+    The list (~26 000 names) is cached in data/raw/dem/; it serves as a global
+    1 deg land mask.
+    """
+    path = TILE_DIR.parent / "tileList_glo90.txt"
+    if not path.exists():
+        if not download:
+            raise FileNotFoundError(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(f"{BASE_URL}/tileList.txt") as resp:
+            path.write_bytes(resp.read())
+    return {parse_tile_name(line.strip()) for line in path.read_text().splitlines() if line.strip()}
+

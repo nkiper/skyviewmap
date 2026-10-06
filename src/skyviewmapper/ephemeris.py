@@ -23,8 +23,8 @@ Assumptions and approximations
 - Sun and Moon radii follow NASA's eclipse tables (see ``constants``).
   Apparent altitude adds standard refraction (Skyfield's Bennett-type
   formula at 10 °C, 1010 hPa); the geometric altitude is returned as well.
-- Totality start/end are found by linear interpolation of
-  ``separation - (r_moon - r_sun)`` between samples. Durations are accurate
+- Central-phase start/end are found by linear interpolation of
+  ``separation - |r_moon - r_sun|`` between samples. Durations are accurate
   to ~0.1 s except within ~1 s of the path edge, where they may be off by up
   to one step.
 - UTC = UT1 + (UTC - UT1) as implied by the Skyfield timescale's Delta T.
@@ -51,7 +51,7 @@ from .constants import (
     WGS84_F,
 )
 
-_TOTALITY_HALF_WINDOW_S = 150.0  # longer than half of any totality
+_CENTRAL_HALF_WINDOW_S = 420.0  # longer than half of any total (<= 7.5 min) or annular (<= 12.5 min) phase
 
 
 @dataclass(frozen=True)
@@ -73,8 +73,11 @@ class LocalCircumstances:
 
     ``magnitude`` is the fraction of the Sun's diameter covered (NASA
     definition, > 1 for total); ``obscuration`` the fraction of its area;
-    ``diameter_ratio`` is Moon/Sun apparent diameter; ``totality_s`` is 0
-    outside the path of totality.
+    ``diameter_ratio`` is Moon/Sun apparent diameter. ``central_s`` is the
+    duration of the central phase (the Moon's disc wholly inside the Sun's,
+    or the Sun's wholly inside the Moon's), 0 outside the central path;
+    ``eclipse_type`` is 0 none, 1 partial, 2 annular, 3 total;
+    ``totality_s`` equals ``central_s`` where total and 0 elsewhere.
     """
 
     t_max_utc: NDArray[np.datetime64]
@@ -87,6 +90,8 @@ class LocalCircumstances:
     diameter_ratio: np.ndarray
     magnitude: np.ndarray
     obscuration: np.ndarray
+    central_s: np.ndarray
+    eclipse_type: np.ndarray
     totality_s: np.ndarray
 
 
@@ -171,8 +176,8 @@ def body_track(
     """Sample geocentric apparent Sun and Moon ITRS positions from ``start_utc`` to ``end_utc``.
 
     Datetimes must be timezone-aware. The window must contain every
-    observer's maximum eclipse (and, for totality durations, ~150 s either
-    side of it).
+    observer's maximum eclipse (and, for central-phase durations, up to
+    ~420 s either side of it).
     """
     start_utc = start_utc.astimezone(timezone.utc)
     n = int(round((end_utc - start_utc).total_seconds() / step_s)) + 1
@@ -265,7 +270,11 @@ def _circumstances_chunk(
     r_s = np.arcsin(R_SUN_M / np.linalg.norm(sun, axis=-1))
     r_m = np.arcsin(R_MOON_M / np.linalg.norm(moon, axis=-1))
     alt, az = alt_az(sun, lat, lon)
-    totality = _totality_duration(track, obs, k, sep - (r_m - r_s))
+    # Central phase: separation below the difference of the radii (total if the
+    # Moon is larger, annular if smaller).
+    central = _central_duration(track, obs, k, sep - np.abs(r_m - r_s))
+    magnitude = eclipse_magnitude(sep, r_s, r_m)
+    etype = np.where(central > 0, np.where(r_m > r_s, 3.0, 2.0), np.where(magnitude > 0, 1.0, 0.0))
 
     out = {
         "t_offset_s": pos * track.step_s,
@@ -276,9 +285,11 @@ def _circumstances_chunk(
         "sun_radius_deg": np.degrees(r_s),
         "moon_radius_deg": np.degrees(r_m),
         "diameter_ratio": r_m / r_s,
-        "magnitude": eclipse_magnitude(sep, r_s, r_m),
+        "magnitude": magnitude,
         "obscuration": obscuration(sep, r_s, r_m),
-        "totality_s": totality,
+        "central_s": central,
+        "eclipse_type": etype,
+        "totality_s": np.where(etype == 3.0, central, 0.0),
     }
     for key in out:
         if key != "t_offset_s":
@@ -286,25 +297,33 @@ def _circumstances_chunk(
     return out
 
 
-def _totality_duration(track: BodyTrack, obs: NDArray[np.float64], k: NDArray[np.intp], g_min: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Seconds during which ``sep < r_moon - r_sun``; 0 where that never happens, NaN if out of window."""
-    n = len(track)
+def _central_duration(
+    track: BodyTrack, obs: NDArray[np.float64], k: NDArray[np.intp], g_min: NDArray[np.float64], chunk: int = 2_000
+) -> NDArray[np.float64]:
+    """Seconds during which ``sep < |r_moon - r_sun|``; 0 where that never happens, NaN if out of window."""
     duration = np.zeros(k.shape)
-    total = g_min < 0
-    if not total.any():
-        return duration
+    central = np.flatnonzero(g_min < 0)
+    for start in range(0, central.size, chunk):
+        sel = central[start : start + chunk]
+        duration[sel] = _central_duration_chunk(track, obs[sel], k[sel], g_min[sel])
+    return duration
 
-    w = int(np.ceil(_TOTALITY_HALF_WINDOW_S / track.step_s))
-    raw = k[total, None] + np.arange(-w, w + 1)
+
+def _central_duration_chunk(
+    track: BodyTrack, obs: NDArray[np.float64], k: NDArray[np.intp], g_min: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    n = len(track)
+    w = int(np.ceil(_CENTRAL_HALF_WINDOW_S / track.step_s))
+    raw = k[:, None] + np.arange(-w, w + 1)
     idx = np.clip(raw, 0, n - 1)
-    o = obs[total][:, None, :]
+    o = obs[:, None, :]
     sun = track.sun_m[idx] - o
     moon = track.moon_m[idx] - o
-    g = angular_separation(sun, moon) - (
+    g = angular_separation(sun, moon) - np.abs(
         np.arcsin(R_MOON_M / np.linalg.norm(moon, axis=-1)) - np.arcsin(R_SUN_M / np.linalg.norm(sun, axis=-1))
     )
-    # Use the interpolated minimum at the centre so very short totalities are still seen as negative.
-    g[:, w] = np.minimum(g[:, w], g_min[total])
+    # Use the interpolated minimum at the centre so very short central phases are still seen as negative.
+    g[:, w] = np.minimum(g[:, w], g_min)
     g[(raw < 0) | (raw > n - 1)] = np.nan  # outside the track: crossing cannot be found
 
     def crossing(side: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -319,5 +338,4 @@ def _totality_duration(track: BodyTrack, obs: NDArray[np.float64], k: NDArray[np
 
     before = crossing(g[:, w::-1])
     after = crossing(g[:, w:])
-    duration[total] = (before + after) * track.step_s
-    return duration
+    return (before + after) * track.step_s
