@@ -19,7 +19,7 @@ overhead. The model therefore looks up cloud cover where the ray crosses each la
 | Milestone | Status |
 |---|---|
 | v1: geometry, ephemeris, terrain, ERA5 cloud, line-of-sight cloud, maps (2026) | ✅ done |
-| v2.1: events as config files, regions derived from the path, annular eclipses; 2 Aug 2027 | 🔄 code done; 2027 run waiting for data downloads |
+| v2.1: events as config files, regions derived from the path, annular eclipses; 2 Aug 2027 | ✅ done |
 | v2.2: interactive web map (tiles + MapLibre viewer) | ⏳ next |
 | v2.3: OpenStreetMap viewpoints, parks, roads; reachable top spots | — |
 | v2.4: public site on GitHub Pages with a methods page | — |
@@ -69,9 +69,12 @@ Outputs, per region in `outputs/<event>/<region>/`:
 - `top_spots_<region>.csv`: the 25 best cells inside the path with at least
   `--min-central` seconds of totality/annularity (default 60), at least 20 km
   apart and at least a third land (which drops offshore rocks), with the best
-  spot's coordinates. Where the clear-sky chance rises toward one edge of the
-  path while the central phase shortens, the list sits near the chosen minimum:
-  the threshold is the trade-off to explore.
+  spot's coordinates. Cells are ranked by chance in whole percent, ties going
+  to the longest totality/annularity. Where the clear-sky chance rises toward
+  one edge of the path while the central phase shortens, the list sits near the
+  chosen minimum: the threshold is the trade-off to explore. Lists are per
+  region, so they can bunch against a region's edge when the best area
+  continues into the next region.
 
 ## Layout
 ```

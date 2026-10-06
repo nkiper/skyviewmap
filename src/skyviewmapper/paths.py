@@ -277,7 +277,13 @@ def derive_regions(
     ]
     provisional = [region_for_tiles(g, cp, event.date, 0) for g in groups]
     order = sorted(range(len(groups)), key=lambda i: provisional[i].window_utc[0])
-    return [region_for_tiles(groups[i], cp, event.date, k + 1, event.display_names) for k, i in enumerate(order)]
+    regions = [region_for_tiles(groups[i], cp, event.date, k + 1, event.display_names) for k, i in enumerate(order)]
+    unknown = set(event.display_names) - {r.name for r in regions}
+    if unknown:
+        raise ValueError(
+            f"display_names for unknown regions {sorted(unknown)}; derived: {', '.join(r.name for r in regions)}"
+        )
+    return regions
 
 
 def event_regions(event: Event, download: bool = True) -> list[Region]:

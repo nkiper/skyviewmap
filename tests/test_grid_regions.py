@@ -1,5 +1,7 @@
 """Grid, region and DEM-band tests (no data needed)."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -59,3 +61,27 @@ def test_regions_are_consistent(name: str) -> None:
     assert (g.dlat * 1200) == pytest.approx(round(g.dlat * 1200))
     assert (g.dlon / px_lon) == pytest.approx(round(g.dlon / px_lon))
     assert r.window_utc[0] < r.window_utc[1]
+
+
+def test_fetch_retries_transient_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import urllib.request
+
+    from skyviewmapper.io import dem
+
+    calls = {"n": 0}
+
+    def flaky(url: str, timeout: float) -> io.BytesIO:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionResetError(54, "Connection reset by peer")
+        return io.BytesIO(b"tile bytes")
+
+    def no_sleep(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(dem.time, "sleep", no_sleep)
+    target = tmp_path / "t.tif"
+    dem._fetch("https://example.invalid/t.tif", target)
+    assert calls["n"] == 3 and target.read_bytes() == b"tile bytes" and not target.with_suffix(".part").exists()

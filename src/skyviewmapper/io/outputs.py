@@ -85,7 +85,8 @@ def top_spots(
     min_central_s: float = 60.0,
     min_land_fraction: float = 1.0 / 3.0,
 ) -> pd.DataFrame:
-    """Best cells by ``p_clear_view`` with at least ``min_central_s`` of totality/annularity, ``min_separation_km`` apart.
+    """Best cells by ``p_clear_view`` (whole percent; ties to the longest central phase), at least
+    ``min_central_s`` of totality/annularity, ``min_separation_km`` apart.
 
     The duration threshold keeps the list away from the edges of the path,
     where the central phase lasts only seconds and the exact limit is
@@ -101,7 +102,12 @@ def top_spots(
         & (ds["land_fraction"].values >= min_land_fraction - 1e-9)
     )
     flat = np.flatnonzero(ok)
-    order = flat[np.argsort(-p.ravel()[flat], kind="stable")]
+    # Rank by chance rounded to whole percentage points, then by the longest
+    # central phase: where many cells are near-certain (e.g. the Sahara), tiny
+    # differences in chance should not beat minutes of extra totality.
+    pct = np.round(p.ravel()[flat] * 100.0)
+    central = ds["central_s"].values.ravel()[flat]
+    order = flat[np.lexsort((-central, -pct))]
     lat = ds["best_lat"].values.ravel()
     lon = ds["best_lon"].values.ravel()
     chosen: list[int] = []

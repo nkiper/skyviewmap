@@ -63,17 +63,20 @@ def cmd_regions(args: argparse.Namespace) -> int:
 
 def cmd_download(args: argparse.Namespace) -> int:
     from .io.dem import download_tiles
-    from .io.era5 import load_cloud_samples
+    from .io.era5 import download_era5, load_cloud_samples
 
     event = load_event(args.event)
     regions = _regions(event, args.region, download=True)
     for r in regions:
         print(f"{r.name}: {len(download_tiles(*r.dem_box))} DEM tiles", flush=True)
-    # The CDS queues requests; a few in parallel shortens the wait.
+    # The CDS queues requests; a few in parallel shortens the wait. Threads only
+    # download: HDF5 (behind NetCDF) is not thread-safe, so cubes are built after.
     with ThreadPoolExecutor(max_workers=args.parallel) as pool:
-        futures = {pool.submit(load_cloud_samples, event, r, True): r for r in regions}
+        futures = {pool.submit(download_era5, event, r): r for r in regions}
         for fut in as_completed(futures):
-            print(f"{futures[fut].name}: ERA5 {dict(fut.result().sizes)}", flush=True)
+            print(f"{futures[fut].name}: ERA5 files {[p.name for p in fut.result()]}", flush=True)
+    for r in regions:
+        print(f"{r.name}: cloud samples {dict(load_cloud_samples(event, r, download=False).sizes)}", flush=True)
     return 0
 
 

@@ -92,6 +92,16 @@ def test_top_spots_sorted_separated_and_in_path() -> None:
     assert table["best_lon"].iloc[0] == pytest.approx(ds["lon"].values.max(), abs=0.011)
 
 
+def test_top_spots_break_ties_by_central_duration() -> None:
+    ds = synthetic_ds()
+    ds["p_clear_view"][:] = np.where(np.isfinite(ds["p_clear_view"].values), 0.9984, np.nan)
+    ds["p_clear_view"][-2, 0] = 0.9991  # rounds to the same 100 %
+    ds["central_s"][:] = np.where(ds["lat"].values[:, None] > 42.03, 100.0, 0.0)
+    ds["central_s"][-3, 5] = 150.0  # longest totality
+    best = top_spots(ds, n=1)
+    assert best["central_s"].iloc[0] == 150.0
+
+
 def test_top_spots_skip_islets() -> None:
     ds = synthetic_ds()
     best = top_spots(ds, n=1)

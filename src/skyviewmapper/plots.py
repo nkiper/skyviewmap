@@ -172,6 +172,14 @@ def _mark_spots(ax: Axes, spots: pd.DataFrame | None, n_labelled: int = 5) -> No
         candidates = markers_pt[k] + 20.0 * dirs  # (8, 2)
         obstacles = np.vstack([markers_pt, *placed]) if placed else markers_pt
         clearance = np.linalg.norm(candidates[:, None, :] - obstacles[None, :, :], axis=-1).min(axis=1)
+        # Never place a number outside the map area (it would be clipped at the figure edge).
+        x0, y0, x1, y1 = (v * to_pt for v in ax.get_window_extent().extents)
+        pad = 8.0
+        inside = (
+            (candidates[:, 0] > x0 + pad) & (candidates[:, 0] < x1 - pad)
+            & (candidates[:, 1] > y0 + pad) & (candidates[:, 1] < y1 - pad)
+        )
+        clearance = np.where(inside, clearance, -np.inf)
         best = int(np.argmax(clearance))
         placed.append(candidates[best][None, :])
         ax.annotate(str(rank), (lo, la), xytext=tuple(20.0 * dirs[best]), textcoords="offset points",

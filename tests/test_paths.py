@@ -105,6 +105,12 @@ def test_derive_regions_drops_buffer_only_land_and_orders_by_time() -> None:
     assert [r.name[:3] for r in regions] == ["r01", "r02"]
 
 
+def test_unknown_display_name_raises() -> None:
+    ev = Event(id="t", name="t", date=DAY, type="total", years=(1997, 2026), display_names={"r09_typo": "x"})
+    with pytest.raises(ValueError, match="unknown regions"):
+        derive_regions(ev, synthetic_cp(), {(35, lo) for lo in range(5, 9)})
+
+
 def test_include_boxes_limit_regions() -> None:
     cp = synthetic_cp()
     ev = Event(id="t", name="t", date=DAY, type="total", years=(1997, 2026), include=((30.0, 40.0, 0.0, 10.0),))

@@ -15,6 +15,7 @@ half a pixel accordingly); this is checked for every tile.
 """
 
 import json
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -75,10 +76,7 @@ def download_tiles(
                 continue
             if not path.exists():
                 try:
-                    with urllib.request.urlopen(f"{BASE_URL}/{name}/{name}.tif") as resp:
-                        tmp = path.with_suffix(".part")
-                        tmp.write_bytes(resp.read())
-                        tmp.rename(path)
+                    _fetch(f"{BASE_URL}/{name}/{name}.tif", path)
                 except urllib.error.HTTPError as err:
                     if err.code in (403, 404):  # S3 answers 403/404 for absent ocean tiles
                         missing.touch()
@@ -86,6 +84,28 @@ def download_tiles(
                     raise
             found.append(path)
     return found
+
+
+def _fetch(url: str, path: Path, attempts: int = 5, timeout_s: float = 120.0) -> None:
+    """Download ``url`` to ``path`` (written whole, then renamed), retrying transient network errors.
+
+    HTTP errors (e.g. 404 for ocean tiles) are raised at once; connection
+    resets, timeouts and 5xx responses are retried with exponential back-off.
+    """
+    tmp = path.with_suffix(".part")
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+                tmp.write_bytes(resp.read())
+            tmp.rename(path)
+            return
+        except urllib.error.HTTPError as err:
+            if err.code < 500 or attempt == attempts - 1:
+                raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            if attempt == attempts - 1:
+                raise
+        time.sleep(2.0 ** attempt)
 
 
 def build_mosaic(
@@ -174,7 +194,6 @@ def land_tiles(download: bool = True) -> set[tuple[int, int]]:
         if not download:
             raise FileNotFoundError(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(f"{BASE_URL}/tileList.txt") as resp:
-            path.write_bytes(resp.read())
+        _fetch(f"{BASE_URL}/tileList.txt", path)
     return {parse_tile_name(line.strip()) for line in path.read_text().splitlines() if line.strip()}
 
