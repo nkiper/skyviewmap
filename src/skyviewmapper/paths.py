@@ -297,9 +297,14 @@ def derive_regions(
 def event_regions(event: Event, download: bool = True) -> list[Region]:
     """The event's explicit regions, or regions derived from its path over land."""
     if event.explicit_regions:
-        return list(event.explicit_regions)
-    from .io.dem import land_tiles
-    from .io.skyfield_data import load_ephemeris
+        regions = list(event.explicit_regions)
+    else:
+        from .io.dem import land_tiles
+        from .io.skyfield_data import load_ephemeris
 
-    eph, ts = load_ephemeris(download=download)
-    return derive_regions(event, coarse_path(eph, ts, event.date), land_tiles(download=download))
+        eph, ts = load_ephemeris(download=download)
+        regions = derive_regions(event, coarse_path(eph, ts, event.date), land_tiles(download=download))
+    slugs = [r.slug for r in regions]
+    if len(set(slugs)) != len(slugs):
+        raise ValueError(f"regions of {event.id} share an output folder name: {slugs}; give them distinct names")
+    return regions

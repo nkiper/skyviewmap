@@ -141,6 +141,17 @@ def test_write_geotiff_georeference(tmp_path: Path) -> None:
     np.testing.assert_allclose(band[0], ds["p_clear_view"].values[-1].astype(np.float32), equal_nan=True)
 
 
+def test_write_outputs_uses_readable_folder_and_file_names(tmp_path: Path) -> None:
+    from skyviewmapper.io.outputs import write_outputs
+
+    ds = synthetic_ds()
+    ds.attrs["region_slug"] = "test-patch"
+    paths = write_outputs(ds, tmp_path, min_central_s=60.0)
+    assert {p.parent for p in paths} == {tmp_path / "test" / "test-patch"}
+    assert all("test-patch" in p.name for p in paths)
+    assert not any("testpatch" in p.name for p in paths)  # the internal name is not used
+
+
 def test_write_maps(tmp_path: Path) -> None:
     ds = synthetic_ds()
     paths = write_maps(ds, tmp_path, top_spots(ds, n=5, min_separation_km=1.0))

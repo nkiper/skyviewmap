@@ -58,7 +58,9 @@ coarse global grid and every land area under it becomes a region of at most
 15° of longitude, each with its own map grid, DEM and ERA5 extents, time
 window and ERA5 hours.
 
-Outputs, per region in `outputs/<event>/<region>/`:
+Outputs, per region in `outputs/<event>/<region>/`, where `<region>` is the
+region's readable name in file-safe form (e.g. `outputs/2027-08-02/eastern-libya-and-egypt/`);
+`--region` accepts either that or the internal name (e.g. `27N_028E`):
 - `skyview_<region>.nc`: every variable on the map grid (probabilities, terrain,
   eclipse circumstances incl. `central_s`, the duration of totality or
   annularity), with units and descriptions.

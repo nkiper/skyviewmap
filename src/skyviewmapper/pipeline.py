@@ -113,6 +113,7 @@ def run_region(event: Event, region: Region, download: bool = True) -> xr.Datase
             "central_word": event.central_word,
             "region": region.name,
             "region_label": region.label,
+            "region_slug": region.slug,
             "grid_res_deg": f"{grid.dlat} x {grid.dlon}",
             "cloud_data": f"ERA5 low/medium/high cloud cover, {event.years[0]}-{event.years[1]}, "
             f"event date ±{event.half_window_days} days, {'/'.join(f'{h:02d}' for h in region.era5_hours)} UT",

@@ -5,6 +5,8 @@ the eclipse path (:mod:`skyviewmapper.paths`). Each region must lie within one
 Copernicus DEM latitude band so its DEM mosaic is a regular grid.
 """
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -39,6 +41,18 @@ class Region:
         return self.display_name or self.name
 
     @property
+    def slug(self) -> str:
+        """Readable, filename-safe form of the label, used for output folders and files."""
+        return slugify(self.label)
+
+    @property
     def cloud_grid(self) -> Grid:
         g = self.grid
         return Grid(g.lat_min, g.lat_max, g.lon_min, g.lon_max, g.dlat * self.cloud_coarsen, g.dlon * self.cloud_coarsen)
+
+
+def slugify(text: str) -> str:
+    """Lower-case ASCII words joined by hyphens: "Eastern Libya & Egypt" -> "eastern-libya-and-egypt"."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[a-z0-9]+", ascii_text.replace("&", " and ").lower())
+    return "-".join(words) or "region"

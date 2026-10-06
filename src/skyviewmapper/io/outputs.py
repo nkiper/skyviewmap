@@ -127,7 +127,7 @@ def write_outputs(ds: xr.Dataset, out_dir: Path | None = None, min_central_s: fl
     """Write NetCDF, GeoTIFFs, PNG maps and the top-spots CSV for one region, in <out_dir>/<event>/<region>/."""
     from ..plots import write_maps  # matplotlib only needed here
 
-    region = str(ds.attrs["region"])
+    region = str(ds.attrs.get("region_slug", ds.attrs["region"]))  # readable name for folders and files
     out_dir = (out_dir or OUTPUT_DIR) / str(ds.attrs["event"]) / region
     paths = [write_netcdf(ds, out_dir / f"skyview_{region}.nc")]
     paths += [write_geotiff(ds[v], out_dir / f"{v}_{region}.tif") for v in GEOTIFF_VARIABLES]

@@ -303,7 +303,7 @@ def _region_title(ds: xr.Dataset) -> str:
 
 def write_maps(ds: xr.Dataset, out_dir: Path, spots: pd.DataFrame | None = None) -> list[Path]:
     """The four maps; ``spots`` (the top-spots table) is marked on each when given."""
-    region = str(ds.attrs.get("region", "region"))
+    region = str(ds.attrs.get("region_slug", ds.attrs.get("region", "region")))
     label = _region_title(ds)
     event = str(ds.attrs.get("event_name", "the eclipse"))
     if spots is not None:

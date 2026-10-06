@@ -21,11 +21,13 @@ def _regions(event: Event, names: list[str] | None, download: bool) -> list[Regi
 
     regions = event_regions(event, download=download)
     if names:
-        known = {r.name for r in regions}
+        # Accept the internal name (e.g. 27N_028E) or the readable slug (e.g. eastern-libya-and-egypt).
+        known = {r.name for r in regions} | {r.slug for r in regions}
         unknown = [n for n in names if n not in known]
         if unknown:
-            raise SystemExit(f"unknown region(s) {unknown}; {event.id} has: {', '.join(sorted(known))}")
-        regions = [r for r in regions if r.name in names]
+            listing = ", ".join(f"{r.name} ({r.slug})" for r in regions)
+            raise SystemExit(f"unknown region(s) {unknown}; {event.id} has: {listing}")
+        regions = [r for r in regions if r.name in names or r.slug in names]
     return regions
 
 
@@ -53,7 +55,7 @@ def cmd_regions(args: argparse.Namespace) -> int:
         total_tiles += tiles
         g = r.grid
         print(
-            f"  {r.name:15s} {r.label if r.display_name else '':28s} grid {g.lat_min:g}..{g.lat_max:g}N "
+            f"  {r.name:10s} {r.slug:44s} grid {g.lat_min:g}..{g.lat_max:g}N "
             f"{g.lon_min:g}..{g.lon_max:g}E ({g.dlat:g} x {g.dlon:g} deg, {n / 1e6:.2f}M cells)  "
             f"{r.window_utc[0]:%H:%M}-{r.window_utc[1]:%H:%M} UT  ERA5 hours {list(r.era5_hours)}  ~{tiles} DEM tiles"
         )
