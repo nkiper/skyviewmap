@@ -1,11 +1,14 @@
 """Grid, region and DEM-band tests (no data needed)."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from skyviewmapper.grid import Grid
 from skyviewmapper.io.dem import build_mosaic, lon_width_factor, tile_cols
-from skyviewmapper.regions import REGIONS
+
+from conftest import event_2026
 
 
 def test_grid_square_cells() -> None:
@@ -45,9 +48,9 @@ def test_mosaic_refuses_mixed_bands() -> None:
         build_mosaic(49.0, 51.0, 0.0, 1.0)
 
 
-@pytest.mark.parametrize("name", list(REGIONS))
+@pytest.mark.parametrize("name", ["iberia", "iceland"])
 def test_regions_are_consistent(name: str) -> None:
-    r = REGIONS[name]
+    r = next(x for x in event_2026().explicit_regions if x.name == name)
     lat_min, lat_max, lon_min, lon_max = r.dem_box
     g = r.grid
     # DEM covers the grid with a margin, within a single Copernicus band.
@@ -58,3 +61,27 @@ def test_regions_are_consistent(name: str) -> None:
     assert (g.dlat * 1200) == pytest.approx(round(g.dlat * 1200))
     assert (g.dlon / px_lon) == pytest.approx(round(g.dlon / px_lon))
     assert r.window_utc[0] < r.window_utc[1]
+
+
+def test_fetch_retries_transient_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import urllib.request
+
+    from skyviewmapper.io import dem
+
+    calls = {"n": 0}
+
+    def flaky(url: str, timeout: float) -> io.BytesIO:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionResetError(54, "Connection reset by peer")
+        return io.BytesIO(b"tile bytes")
+
+    def no_sleep(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(dem.time, "sleep", no_sleep)
+    target = tmp_path / "t.tif"
+    dem._fetch("https://example.invalid/t.tif", target)
+    assert calls["n"] == 3 and target.read_bytes() == b"tile bytes" and not target.with_suffix(".part").exists()

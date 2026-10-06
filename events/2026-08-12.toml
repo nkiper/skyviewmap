@@ -1,0 +1,30 @@
+# Total solar eclipse of 12 August 2026 (v1). Regions are given explicitly so
+# results reproduce v1 exactly; the path also crossed Greenland and Siberia,
+# which were left out on purpose.
+id = "2026-08-12"
+name = "Total solar eclipse of 12 August 2026"
+date = 2026-08-12
+type = "total"
+years = [1996, 2025]
+half_window_days = 7
+
+[[regions]]
+name = "iberia"
+display_name = "Iberia (Spain, Portugal, Balearics)"
+grid = [36.0, 44.0, -10.0, 4.5]
+res = 0.01
+dem_box = [35.0, 45.0, -12.5, 4.5]
+era5_box = [33.0, 47.0, -15.0, 7.0]
+window_utc = ["18:10", "18:45"]
+era5_hours = [18, 19]
+
+[[regions]]
+name = "iceland"
+display_name = "Iceland"
+grid = [63.0, 67.0, -25.0, -13.0]
+res = 0.01
+res_lon = 0.02
+dem_box = [62.5, 67.5, -25.5, -12.5]
+era5_box = [62.0, 68.0, -27.0, -11.0]
+window_utc = ["17:20", "18:20"]
+era5_hours = [17, 18]

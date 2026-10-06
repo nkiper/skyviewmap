@@ -11,9 +11,10 @@ import xarray as xr
 
 from skyviewmapper.grid import Grid, resample_bilinear
 from skyviewmapper.io.era5 import load_cloud_samples
-from skyviewmapper.los_cloud import bilinear_weights, los_cloud, slant_clear_fraction, time_weight
-from skyviewmapper.regions import REGIONS
+from skyviewmapper.los_cloud import bilinear_weights, bracketing_hours, los_cloud, slant_clear_fraction, time_weight
 from skyviewmapper.terrain import Dem, cell_ground_height
+
+from conftest import event_2026, region_2026  # noqa: E402
 
 T_1830 = np.datetime64("2026-08-12T18:30", "ms")
 
@@ -74,8 +75,15 @@ def test_cell_ground_height() -> None:
 
 
 def test_region_cloud_grid() -> None:
-    assert REGIONS["iberia"].cloud_grid.shape == (160, 290)
-    assert REGIONS["iceland"].cloud_grid.shape == (80, 120)
+    assert region_2026("iberia").cloud_grid.shape == (160, 290)
+    assert region_2026("iceland").cloud_grid.shape == (80, 120)
+
+
+def test_bracketing_hours() -> None:
+    t = np.array(["2027-08-02T08:30", "2027-08-02T09:15", "2027-08-02T07:50", "2027-08-02T10:40"], dtype="datetime64[ms]")
+    w, i = bracketing_hours(t, [8, 9, 10])
+    np.testing.assert_allclose(w, [0.5, 0.25, 0.0, 1.0])  # before / after the range: clamped
+    assert i.tolist() == [0, 1, 0, 1]
 
 
 # --- synthetic cubes ---------------------------------------------------------
@@ -84,21 +92,21 @@ LAT = np.arange(30.0, 50.01, 0.25)
 LON = np.arange(-20.0, 10.01, 0.25)
 
 
-def cube(lcc: np.ndarray, mcc: np.ndarray, hcc: np.ndarray) -> xr.Dataset:
-    """Arrays shaped (year, day, hour, lat, lon) -> ERA5-like sample cube with hours 18, 19."""
+def cube(lcc: np.ndarray, mcc: np.ndarray, hcc: np.ndarray, hours: tuple[int, ...] = (18, 19)) -> xr.Dataset:
+    """Arrays shaped (year, day, hour, lat, lon) -> ERA5-like sample cube with the given hours."""
     dims = ("year", "day", "hour", "latitude", "longitude")
     coords = {
         "year": np.arange(lcc.shape[0]),
         "day": np.arange(lcc.shape[1]),
-        "hour": [18, 19],
+        "hour": list(hours),
         "latitude": LAT,
         "longitude": LON,
     }
     return xr.Dataset({"lcc": (dims, lcc), "mcc": (dims, mcc), "hcc": (dims, hcc)}, coords=coords)
 
 
-def uniform(value: float, n_samples: int = 1) -> np.ndarray:
-    return np.full((n_samples, 1, 2, LAT.size, LON.size), value, dtype=np.float32)
+def uniform(value: float, n_samples: int = 1, n_hours: int = 2) -> np.ndarray:
+    return np.full((n_samples, 1, n_hours, LAT.size, LON.size), value, dtype=np.float32)
 
 
 def test_uniform_layers_hand_value() -> None:
@@ -144,6 +152,22 @@ def test_time_interpolation_between_hours() -> None:
     np.testing.assert_allclose(r.p_clear_sky_no_slant, [0.5, 1.0, 0.0], atol=1e-6)
 
 
+def test_time_interpolation_across_three_hours() -> None:
+    # Clear at 08 UT, overcast at 09, clear at 10: each cell uses its own bracketing pair.
+    lcc = uniform(0.0, n_hours=3)
+    lcc[:, :, 1] = 1.0
+    s = cube(lcc, uniform(0.0, n_hours=3), uniform(0.0, n_hours=3), hours=(8, 9, 10))
+    t = np.array(["2027-08-02T08:30", "2027-08-02T09:00", "2027-08-02T09:45"], dtype="datetime64[ms]")
+    r = los_cloud(s, 36.0, -5.0, 0.0, t, 40.0, 95.0)
+    np.testing.assert_allclose(r.p_clear_sky_no_slant, [0.5, 0.0, 0.75], atol=1e-6)
+
+
+def test_non_consecutive_hours_raise() -> None:
+    s = cube(uniform(0.0), uniform(0.0), uniform(0.0), hours=(8, 10))
+    with pytest.raises(ValueError, match="consecutive"):
+        los_cloud(s, 36.0, -5.0, 0.0, np.datetime64("2027-08-02T09:00", "ms"), 40.0, 95.0)
+
+
 def test_crossing_outside_box_raises() -> None:
     s = cube(uniform(0.0), uniform(0.0), uniform(0.0))
     with pytest.raises(ValueError, match="outside the ERA5 box"):
@@ -155,9 +179,8 @@ def test_crossing_outside_box_raises() -> None:
 
 @pytest.mark.era5
 def test_real_iberia_cities_bounds() -> None:
-    region = REGIONS["iberia"]
     try:
-        samples = load_cloud_samples(region, download=False)
+        samples = load_cloud_samples(event_2026(), region_2026("iberia"), download=False)
     except FileNotFoundError:
         pytest.skip("ERA5 samples not downloaded")
     lat = np.array([40.42, 39.47, 39.57, 43.46])  # Madrid, Valencia, Palma, Santander

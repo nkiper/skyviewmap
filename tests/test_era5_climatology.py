@@ -4,21 +4,26 @@ Synthetic datasets need no downloads; tests marked ``era5`` use the real
 cached cloud samples and skip if they are absent.
 """
 
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
 from skyviewmapper.climatology import layer_means, overhead_clear_probability
-from skyviewmapper.io.era5 import era5_request, load_cloud_samples, to_sample_cube, window_days
-from skyviewmapper.regions import REGIONS
+from skyviewmapper.io.era5 import era5_request, load_cloud_samples, month_segments, to_sample_cube
+
+from conftest import event_2026, region_2026, synthetic_event
 
 # --- request -----------------------------------------------------------------
 
 
-def test_window_days() -> None:
-    assert window_days(7) == list(range(5, 20))
-    assert window_days(0) == [12]
+def test_month_segments_cross_month_boundary() -> None:
+    # 2 Aug +- 7 days = 26 Jul .. 9 Aug: requested as two months.
+    ev = synthetic_event(day=date(2027, 8, 2), years=(1997, 2026), half_window=7)
+    assert month_segments(ev, 2026) == [(7, [26, 27, 28, 29, 30, 31]), (8, list(range(1, 10)))]
+    assert month_segments(event_2026(), 2025) == [(8, list(range(5, 20)))]
 
 
 @pytest.mark.parametrize(
@@ -29,7 +34,7 @@ def test_window_days() -> None:
     ],
 )
 def test_era5_request(name: str, area: list[float], times: list[str]) -> None:
-    req = era5_request(REGIONS[name], [1996, 2025], [11, 12])
+    req = era5_request(region_2026(name), [1996, 2025], 8, [11, 12])
     assert req["area"] == area  # N, W, S, E
     assert req["time"] == times
     assert req["year"] == ["1996", "2025"]
@@ -40,17 +45,20 @@ def test_era5_request(name: str, area: list[float], times: list[str]) -> None:
 
 # --- reshaping ---------------------------------------------------------------
 
-YEARS, DAYS, HOURS = [2000, 2001], [11, 12], [18, 19]
+HOURS = [18, 19]
 
 
-def synthetic_hourly(drop: int | None = None) -> xr.Dataset:
-    """Hourly dataset in the CDS layout; lcc encodes its own (year, day, hour)."""
-    times = pd.DatetimeIndex(
-        [pd.Timestamp(y, 8, d, h) for y in YEARS for d in DAYS for h in HOURS]
-    )
+def synthetic_hourly(day: date = date(2000, 8, 12), drop: int | None = None) -> xr.Dataset:
+    """Hourly dataset in the CDS layout around ``day`` (+-1 day, 2 years); lcc encodes (year, offset, hour)."""
+    ev = synthetic_event(day=day)
+    stamps = [
+        pd.Timestamp(d.year, d.month, d.day, h) for y in ev.year_list for d in ev.window_dates(y) for h in HOURS
+    ]
+    times = pd.DatetimeIndex(stamps)
     if drop is not None:
         times = times.delete(drop)
-    code = (times.year - 2000) * 0.1 + (times.day - 11) * 0.01 + (times.hour - 18) * 0.001
+    offset = np.array([(t.date() - day.replace(year=t.year)).days for t in times])
+    code = (times.year - 2000) * 0.1 + (offset + 1) * 0.01 + (times.hour - 18) * 0.001
     lat = np.array([41.0, 40.75])  # descending, as delivered by the CDS
     lon = np.array([-4.0, -3.75, -3.5])
     shape = (len(times), lat.size, lon.size)
@@ -67,27 +75,37 @@ def synthetic_hourly(drop: int | None = None) -> xr.Dataset:
 
 
 def test_to_sample_cube_places_every_sample() -> None:
-    cube = to_sample_cube(synthetic_hourly(), YEARS, DAYS, HOURS)
-    assert dict(cube.sizes) == {"year": 2, "day": 2, "hour": 2, "latitude": 2, "longitude": 3}
+    cube = to_sample_cube(synthetic_hourly(), synthetic_event(), HOURS)
+    assert dict(cube.sizes) == {"year": 2, "day": 3, "hour": 2, "latitude": 2, "longitude": 3}
+    assert cube["day"].values.tolist() == [-1, 0, 1]
     assert cube["latitude"].values.tolist() == [40.75, 41.0]  # ascending
     assert cube["lcc"].dtype == np.float32
-    # Southern row holds the bare code: 0.1 * (year - 2000) + 0.01 * (day - 11) + 0.001 * (hour - 18).
-    v = cube["lcc"].sel(year=2001, day=12, hour=19, latitude=40.75, longitude=-3.5)
-    assert float(v) == pytest.approx(0.111, abs=1e-6)
-    assert float(cube["lcc"].sel(year=2000, day=11, hour=18, latitude=41.0, longitude=-4.0)) == pytest.approx(0.5)
+    # Southern row holds the bare code: 0.1 (year - 2000) + 0.01 (offset + 1) + 0.001 (hour - 18).
+    v = cube["lcc"].sel(year=2001, day=1, hour=19, latitude=40.75, longitude=-3.5)
+    assert float(v) == pytest.approx(0.121, abs=1e-6)
+    assert float(cube["lcc"].sel(year=2000, day=-1, hour=18, latitude=41.0, longitude=-4.0)) == pytest.approx(0.5)
     assert "expver" not in cube.coords and "number" not in cube.coords
+
+
+def test_to_sample_cube_across_month_boundary() -> None:
+    # Event on 1 March: the window starts on 28 or 29 Feb, so offsets come from real dates.
+    day = date(2000, 3, 1)
+    cube = to_sample_cube(synthetic_hourly(day=day), synthetic_event(day=day), HOURS)
+    assert cube["day"].values.tolist() == [-1, 0, 1]
+    v = cube["lcc"].sel(year=2001, day=-1, hour=18, latitude=40.75, longitude=-4.0)  # 28 Feb 2001
+    assert float(v) == pytest.approx(0.1, abs=1e-6)
 
 
 def test_to_sample_cube_missing_sample_raises() -> None:
     with pytest.raises(ValueError, match="missing"):
-        to_sample_cube(synthetic_hourly(drop=3), YEARS, DAYS, HOURS)
+        to_sample_cube(synthetic_hourly(drop=3), synthetic_event(), HOURS)
 
 
 def test_to_sample_cube_nan_raises() -> None:
     ds = synthetic_hourly()
     ds["hcc"][0, 0, 0] = np.nan
     with pytest.raises(ValueError, match="NaN"):
-        to_sample_cube(ds, YEARS, DAYS, HOURS)
+        to_sample_cube(ds, synthetic_event(), HOURS)
 
 
 # --- climatology -------------------------------------------------------------
@@ -127,11 +145,11 @@ def test_correlated_layers_average_per_sample() -> None:
 
 
 @pytest.mark.era5
-@pytest.mark.parametrize("name", list(REGIONS))
+@pytest.mark.parametrize("name", ["iberia", "iceland"])
 def test_real_samples(name: str) -> None:
-    region = REGIONS[name]
+    region = region_2026(name)
     try:
-        samples = load_cloud_samples(region, download=False)
+        samples = load_cloud_samples(event_2026(), region, download=False)
     except FileNotFoundError:
         pytest.skip("ERA5 samples not downloaded")
     assert dict(samples.sizes)["year"] == 30 and dict(samples.sizes)["day"] == 15

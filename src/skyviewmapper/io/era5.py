@@ -7,10 +7,15 @@ the dataset licence accepted on the CDS website.
 
 The samples are kept as a cube (year, day, hour, latitude, longitude) rather
 than averaged, because the probability of a clear line of sight must be
-computed per sample before averaging (layers are correlated in time).
+computed per sample before averaging (layers are correlated in time). ``day``
+is the offset in days from the event date (-N..N), so windows may cross a
+month boundary; they are requested one month at a time, because a CDS request
+takes the full product of its month and day lists.
 """
 
 from collections.abc import Sequence
+from datetime import date
+from itertools import groupby
 from pathlib import Path
 from typing import Any
 
@@ -18,32 +23,31 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from ..event import Event
 from ..regions import Region
 
 DATASET = "reanalysis-era5-single-levels"
 VARIABLES = {"low_cloud_cover": "lcc", "medium_cloud_cover": "mcc", "high_cloud_cover": "hcc"}
-DEFAULT_YEARS = tuple(range(1996, 2026))  # latest 30 complete years
-EVENT_MONTH, EVENT_DAY = 8, 12
-DEFAULT_HALF_WINDOW_DAYS = 7
 
 _ROOT = Path(__file__).resolve().parents[3]
 RAW_DIR = _ROOT / "data" / "raw" / "era5"
 CACHE_DIR = _ROOT / "data" / "processed"
 
 
-def window_days(half_window: int = DEFAULT_HALF_WINDOW_DAYS) -> list[int]:
-    """Days of August within +-``half_window`` of the 12th."""
-    return list(range(EVENT_DAY - half_window, EVENT_DAY + half_window + 1))
+def month_segments(event: Event, year: int) -> list[tuple[int, list[int]]]:
+    """The climatology window in ``year`` as (month, [days]) runs, in date order."""
+    dates = event.window_dates(year)
+    return [(m, [d.day for d in grp]) for m, grp in groupby(dates, key=lambda d: d.month)]
 
 
-def era5_request(region: Region, years: Sequence[int], days: Sequence[int]) -> dict[str, Any]:
-    """CDS request body for the region's cloud-cover box, years, days and hours."""
+def era5_request(region: Region, years: Sequence[int], month: int, days: Sequence[int]) -> dict[str, Any]:
+    """CDS request body for the region's cloud-cover box, one month's days, all years, the region's hours."""
     lat_min, lat_max, lon_min, lon_max = region.era5_box
     return {
         "product_type": ["reanalysis"],
         "variable": list(VARIABLES),
         "year": [str(y) for y in years],
-        "month": [f"{EVENT_MONTH:02d}"],
+        "month": [f"{month:02d}"],
         "day": [f"{d:02d}" for d in days],
         "time": [f"{h:02d}:00" for h in region.era5_hours],
         "area": [lat_max, lon_min, lat_min, lon_max],  # N, W, S, E
@@ -52,39 +56,42 @@ def era5_request(region: Region, years: Sequence[int], days: Sequence[int]) -> d
     }
 
 
-def _raw_path(region: Region, years: Sequence[int], half_window: int) -> Path:
-    return RAW_DIR / f"{region.name}_{years[0]}-{years[-1]}_aug{EVENT_DAY}pm{half_window}.nc"
+def _raw_path(event: Event, region: Region, years: Sequence[int], month: int) -> Path:
+    return RAW_DIR / event.id / f"{region.name}_{years[0]}-{years[-1]}_m{month:02d}.nc"
 
 
-def download_era5(
-    region: Region, years: Sequence[int] = DEFAULT_YEARS, half_window: int = DEFAULT_HALF_WINDOW_DAYS
-) -> list[Path]:
-    """Download (if not already present) and return the raw NetCDF file(s) for a region.
+def download_era5(event: Event, region: Region) -> list[Path]:
+    """Download (if not already present) and return the raw NetCDF files for a region.
 
-    Tries one request for all years; if the CDS refuses it as too large,
-    falls back to one request per decade.
+    One request per month segment of the window. If the CDS refuses a request
+    as too large, that segment falls back to one request per decade.
     """
     import cdsapi  # imported here so the rest of the package works without CDS credentials
 
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    days = window_days(half_window)
-    whole = _raw_path(region, years, half_window)
-    if whole.exists():
-        return [whole]
+    years = list(event.year_list)
+    # The month split does not depend on the year, except around 29 Feb.
+    segments = month_segments(event, years[-1])
     client = cdsapi.Client()
-    try:
-        _retrieve(client, era5_request(region, years, days), whole)
-        return [whole]
-    except Exception as err:  # the CDS reports cost-limit refusals as generic HTTP errors
-        if "too large" not in str(err).lower() and "cost" not in str(err).lower():
-            raise
     paths = []
-    for start in range(0, len(years), 10):
-        chunk = list(years[start : start + 10])
-        path = _raw_path(region, chunk, half_window)
-        if not path.exists():
-            _retrieve(client, era5_request(region, chunk, days), path)
-        paths.append(path)
+    for month, days in segments:
+        whole = _raw_path(event, region, years, month)
+        if whole.exists():
+            paths.append(whole)
+            continue
+        whole.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _retrieve(client, era5_request(region, years, month, days), whole)
+            paths.append(whole)
+            continue
+        except Exception as err:  # the CDS reports cost-limit refusals as generic HTTP errors
+            if "too large" not in str(err).lower() and "cost" not in str(err).lower():
+                raise
+        for start in range(0, len(years), 10):
+            chunk = years[start : start + 10]
+            path = _raw_path(event, region, chunk, month)
+            if not path.exists():
+                _retrieve(client, era5_request(region, chunk, month, days), path)
+            paths.append(path)
     return paths
 
 
@@ -94,19 +101,23 @@ def _retrieve(client: Any, request: dict[str, Any], target: Path) -> None:
     tmp.rename(target)
 
 
-def to_sample_cube(ds: xr.Dataset, years: Sequence[int], days: Sequence[int], hours: Sequence[int]) -> xr.Dataset:
-    """Arrange an hourly ERA5 dataset as (year, day, hour, latitude, longitude).
+def to_sample_cube(ds: xr.Dataset, event: Event, hours: Sequence[int]) -> xr.Dataset:
+    """Arrange an hourly ERA5 dataset as (year, day, hour, latitude, longitude), day = offset from the event date.
 
     Keeps lcc/mcc/hcc as float32, sorts latitude ascending, and raises if any
     expected (year, day, hour) is missing or any value is NaN.
     """
     time_dim = "valid_time" if "valid_time" in ds.dims else "time"
     t = pd.DatetimeIndex(ds[time_dim].values)
-    index = pd.MultiIndex.from_arrays([t.year, t.day, t.hour], names=["year", "day", "hour"])
+    offset = np.array(
+        [(date(y, m, d) - event.date.replace(year=y)).days for y, m, d in zip(t.year, t.month, t.day)], dtype=int
+    )
+    index = pd.MultiIndex.from_arrays([t.year, offset, t.hour], names=["year", "day", "hour"])
     ds = ds[list(VARIABLES.values())].drop_vars(time_dim).assign_coords(
         xr.Coordinates.from_pandas_multiindex(index, time_dim)
     )
-    expected = pd.MultiIndex.from_product([list(years), list(days), list(hours)], names=["year", "day", "hour"])
+    days = list(range(-event.half_window_days, event.half_window_days + 1))
+    expected = pd.MultiIndex.from_product([list(event.year_list), days, list(hours)], names=["year", "day", "hour"])
     missing = expected[~expected.isin(ds.indexes[time_dim])]
     if len(missing):
         raise ValueError(f"{len(missing)} expected samples missing, e.g. {list(missing[:3])}")
@@ -120,32 +131,22 @@ def to_sample_cube(ds: xr.Dataset, years: Sequence[int], days: Sequence[int], ho
     return ds
 
 
-def load_cloud_samples(
-    region: Region,
-    years: Sequence[int] = DEFAULT_YEARS,
-    half_window: int = DEFAULT_HALF_WINDOW_DAYS,
-    download: bool = True,
-) -> xr.Dataset:
-    """Cloud-cover sample cube for a region, cached as NetCDF in data/processed/."""
-    cache = CACHE_DIR / f"era5_{region.name}_{years[0]}-{years[-1]}_aug{EVENT_DAY}pm{half_window}.nc"
+def load_cloud_samples(event: Event, region: Region, download: bool = True) -> xr.Dataset:
+    """Cloud-cover sample cube for one region of an event, cached as NetCDF in data/processed/<event>/."""
+    y0, y1 = event.years
+    cache = CACHE_DIR / event.id / f"era5_{region.name}_{y0}-{y1}_pm{event.half_window_days}.nc"
     if cache.exists():
         return xr.load_dataset(cache)
     if download:
-        paths = download_era5(region, years, half_window)
+        paths = download_era5(event, region)
     else:
-        paths = [_raw_path(region, years, half_window)]
-        if not paths[0].exists():
-            raise FileNotFoundError(paths[0])
+        years = list(event.year_list)
+        paths = [_raw_path(event, region, years, m) for m, _ in month_segments(event, years[-1])]
+        for p in paths:
+            if not p.exists():
+                raise FileNotFoundError(p)
     raw = xr.concat([xr.load_dataset(p) for p in paths], dim="valid_time")
-    cube = to_sample_cube(raw, years, window_days(half_window), region.era5_hours)
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cube = to_sample_cube(raw, event, region.era5_hours)
+    cache.parent.mkdir(parents=True, exist_ok=True)
     cube.to_netcdf(cache)
     return cube
-
-
-if __name__ == "__main__":
-    from ..regions import REGIONS
-
-    for r in REGIONS.values():
-        cube = load_cloud_samples(r)
-        print(f"{r.name}: {dict(cube.sizes)}")

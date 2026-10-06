@@ -11,8 +11,9 @@ import xarray as xr
 from skyviewmapper.grid import Grid
 from skyviewmapper.io.outputs import top_spots, write_geotiff, write_netcdf
 from skyviewmapper.plots import write_maps
-from skyviewmapper.regions import REGIONS
 from skyviewmapper.visibility import combine_visibility
+
+from conftest import event_2026, region_2026
 
 # --- combination -------------------------------------------------------------
 
@@ -57,12 +58,20 @@ def synthetic_ds() -> xr.Dataset:
         "t_max_utc": np.full(shape, np.datetime64("2026-08-12T18:29", "ms")),
         "sun_alt_apparent_deg": np.full(shape, 8.0),
         "sun_az_deg": np.full(shape, 282.0),
-        "totality_s": np.where(lat > 42.03, 100.0, 0.0),
+        "central_s": np.where(lat > 42.03, 100.0, 0.0),
     }
     return xr.Dataset(
         {k: (("lat", "lon"), a) for k, a in data.items()},
         coords={"lat": g.lats, "lon": g.lons},
-        attrs={"region": "testpatch", "cloud_data": "synthetic", "terrain_data": "synthetic"},
+        attrs={
+            "event": "test",
+            "event_name": "Test eclipse",
+            "central_word": "totality",
+            "region": "testpatch",
+            "region_label": "Test patch",
+            "cloud_data": "synthetic",
+            "terrain_data": "synthetic",
+        },
     )
 
 
@@ -71,7 +80,7 @@ def test_top_spots_sorted_separated_and_in_path() -> None:
     table = top_spots(ds, n=5, min_separation_km=5.0)
     assert len(table) >= 2
     assert (np.diff(table["p_clear_view"].to_numpy()) <= 0).all()
-    assert (table["totality_s"] > 0).all()
+    assert (table["central_s"] > 0).all()
     lat, lon = np.radians(table["best_lat"].to_numpy()), np.radians(table["best_lon"].to_numpy())
     for i in range(len(table)):
         for j in range(i):
@@ -81,6 +90,16 @@ def test_top_spots_sorted_separated_and_in_path() -> None:
             assert d >= 5.0
     # The best cell is at the eastern edge (p rises eastwards), inside the path.
     assert table["best_lon"].iloc[0] == pytest.approx(ds["lon"].values.max(), abs=0.011)
+
+
+def test_top_spots_break_ties_by_central_duration() -> None:
+    ds = synthetic_ds()
+    ds["p_clear_view"][:] = np.where(np.isfinite(ds["p_clear_view"].values), 0.9984, np.nan)
+    ds["p_clear_view"][-2, 0] = 0.9991  # rounds to the same 100 %
+    ds["central_s"][:] = np.where(ds["lat"].values[:, None] > 42.03, 100.0, 0.0)
+    ds["central_s"][-3, 5] = 150.0  # longest totality
+    best = top_spots(ds, n=1)
+    assert best["central_s"].iloc[0] == 150.0
 
 
 def test_top_spots_skip_islets() -> None:
@@ -95,10 +114,10 @@ def test_top_spots_skip_islets() -> None:
     )
 
 
-def test_top_spots_respect_min_totality() -> None:
+def test_top_spots_respect_min_central() -> None:
     ds = synthetic_ds()  # 100 s of totality north of 42.03 N, none south
-    assert len(top_spots(ds, min_totality_s=120.0)) == 0
-    assert len(top_spots(ds, n=3, min_separation_km=1.0, min_totality_s=60.0)) == 3
+    assert len(top_spots(ds, min_central_s=120.0)) == 0
+    assert len(top_spots(ds, n=3, min_separation_km=1.0, min_central_s=60.0)) == 3
 
 
 def test_write_netcdf_roundtrip(tmp_path: Path) -> None:
@@ -140,9 +159,9 @@ def test_run_region_smoke() -> None:
     from skyviewmapper.pipeline import run_region
 
     # A 0.2 deg patch near Burgos, reusing Iberia's cached DEM and cloud data.
-    region = dataclasses.replace(REGIONS["iberia"], grid=Grid(42.2, 42.4, -3.8, -3.6, 0.01))
+    region = dataclasses.replace(region_2026("iberia"), grid=Grid(42.2, 42.4, -3.8, -3.6, 0.01))
     try:
-        ds = run_region(region, download=False)
+        ds = run_region(event_2026(), region, download=False)
     except FileNotFoundError:
         pytest.skip("data not downloaded")
     assert dict(ds.sizes) == {"lat": 20, "lon": 20}

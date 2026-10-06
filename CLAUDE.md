@@ -1,9 +1,10 @@
 # Eclipse visibility mapper
 
 ## Goal
-Map where an astronomical event (first target: the 12 Aug 2026 eclipse over Spain)
-is most likely to be visible, accounting for historical cloud cover *along the
-line of sight* and terrain obstruction toward the event's azimuth.
+Map where a solar eclipse (events defined in `events/*.toml`; v1 was 12 Aug 2026,
+next is 2 Aug 2027) is most likely to be visible, accounting for historical cloud
+cover *along the line of sight* and terrain obstruction toward the event's
+azimuth. v2 adds an interactive public web map (GitHub Pages).
 
 ## Method (v1)
 - Ephemeris: Skyfield for event altitude/azimuth per grid point.

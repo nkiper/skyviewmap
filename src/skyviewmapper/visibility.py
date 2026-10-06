@@ -22,11 +22,11 @@ def combine_visibility(
     p_clear_sky_no_slant: ArrayLike,
     best_margin_deg: ArrayLike,
     clear_fraction: ArrayLike,
-    totality_s: ArrayLike,
+    central_s: ArrayLike,
 ) -> dict[str, NDArray[np.float64] | NDArray[np.bool_]]:
     """Headline and alternative clear-view probabilities plus masks, all on one grid."""
     p, p0, margin, frac, tot = np.broadcast_arrays(
-        *(np.asarray(x, dtype=float) for x in (p_clear_sky, p_clear_sky_no_slant, best_margin_deg, clear_fraction, totality_s))
+        *(np.asarray(x, dtype=float) for x in (p_clear_sky, p_clear_sky_no_slant, best_margin_deg, clear_fraction, central_s))
     )
     land = np.isfinite(margin)
     blocked = land & (margin <= 0)
